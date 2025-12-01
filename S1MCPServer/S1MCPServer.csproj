@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <Import Project="build/paths.props"/>
+    <!-- Local path overrides (git-ignored) - only imported if file exists -->
+    <Import Project="build/paths.local.props" Condition="Exists('build/paths.local.props')" />
 
     <PropertyGroup>
         <!-- Testing props -->
