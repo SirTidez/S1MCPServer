@@ -55,6 +55,9 @@ public class CommandRouter
         _handlers["list_vehicles"] = new VehicleCommandHandler(_responseQueue);
         _handlers["get_vehicle"] = new VehicleCommandHandler(_responseQueue);
         
+        // Log handlers
+        _handlers["capture_logs"] = new LogCommandHandler(_responseQueue);
+        
         // Debug handlers - modularized into separate handlers
         var discoveryHandler = new DebugDiscoveryHandler(_responseQueue);
         _handlers["find_gameobjects"] = discoveryHandler;

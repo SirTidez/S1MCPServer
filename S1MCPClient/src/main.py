@@ -19,6 +19,7 @@ from .tools import property_tools
 from .tools import vehicle_tools
 from .tools import game_state_tools
 from .tools import debug_tools
+from .tools import log_tools
 
 
 # Global TCP client instance
@@ -107,6 +108,15 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
         logger.debug(f"Loaded {len(tools)} debug tools")
     except Exception as e:
         logger.error(f"Error loading debug tools: {e}", exc_info=True)
+    
+    # Log tools
+    try:
+        tools = log_tools.get_log_tools(tcp_client)
+        all_tools.extend(tools)
+        all_tool_handlers.update(log_tools.TOOL_HANDLERS)
+        logger.debug(f"Loaded {len(tools)} log tools")
+    except Exception as e:
+        logger.error(f"Error loading log tools: {e}", exc_info=True)
     
     # Log tool collection
     logger.info(f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}")
