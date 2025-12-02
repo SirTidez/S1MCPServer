@@ -10,14 +10,13 @@ using Object = Il2CppSystem.Object;
 namespace S1MCPServer.Utils;
 
 /// <summary>
-/// Provides cross-runtime type utilities using UniverseLib when available.
+/// Provides cross-runtime type utilities.
 /// Handles type resolution, casting, and compatibility between Mono and IL2CPP.
 /// </summary>
 public static class CrossRuntimeTypeHelper
 {
     /// <summary>
     /// Resolves a type name to a Type object, handling both Mono and IL2CPP naming conventions.
-    /// Uses UniverseLib for enhanced type resolution when available.
     /// </summary>
     /// <param name="typeName">The full type name to resolve.</param>
     /// <returns>The resolved Type, or null if not found.</returns>
@@ -25,21 +24,6 @@ public static class CrossRuntimeTypeHelper
     {
         if (string.IsNullOrEmpty(typeName))
             return null;
-
-        // Try UniverseLib first if available (may have better type resolution)
-        if (UniverseLibWrapper.IsAvailable)
-        {
-            try
-            {
-                // UniverseLib may provide enhanced type resolution
-                // For now, we still use standard resolution but UniverseLib's presence
-                // helps with cross-runtime compatibility
-            }
-            catch
-            {
-                // Fall through to standard resolution
-            }
-        }
 
         // Try standard type resolution
         Type? type = Type.GetType(typeName);
@@ -97,7 +81,6 @@ public static class CrossRuntimeTypeHelper
 
     /// <summary>
     /// Safely casts an object to type T, handling both Mono and IL2CPP.
-    /// Uses UniverseLib for enhanced cross-runtime casting when available.
     /// </summary>
     /// <typeparam name="T">The target type.</typeparam>
     /// <param name="obj">The object to cast.</param>
@@ -114,24 +97,6 @@ public static class CrossRuntimeTypeHelper
 
         if (obj == null)
             return false;
-
-        // Try UniverseLib casting first if available (provides best cross-runtime support)
-        if (UniverseLibWrapper.IsAvailable)
-        {
-            try
-            {
-                var universeLibResult = UniverseLibWrapper.TryCast<T>(obj);
-                if (universeLibResult != null)
-                {
-                    result = universeLibResult;
-                    return true;
-                }
-            }
-            catch
-            {
-                // UniverseLib casting failed, fall through to standard methods
-            }
-        }
 
 #if !MONO
         // IL2CPP: Use Il2CppInterop for casting
@@ -173,7 +138,6 @@ public static class CrossRuntimeTypeHelper
 
     /// <summary>
     /// Checks if a type is assignable from another type, handling IL2CPP compatibility.
-    /// Uses UniverseLib for enhanced type checking when available.
     /// </summary>
     /// <param name="targetType">The target type.</param>
     /// <param name="sourceType">The source type.</param>
@@ -183,38 +147,28 @@ public static class CrossRuntimeTypeHelper
         if (targetType == null || sourceType == null)
             return false;
 
-        // Try UniverseLib first if available (provides better cross-runtime type checking)
-        if (UniverseLibWrapper.IsAvailable)
-        {
-            try
-            {
-                // UniverseLib may provide enhanced type checking
-                // For now, we still use standard checks but UniverseLib's presence
-                // helps ensure compatibility
-            }
-            catch
-            {
-                // Fall through to standard checking
-            }
-        }
-
         // Standard type checking
         if (targetType.IsAssignableFrom(sourceType))
             return true;
 
 #if !MONO
-        // IL2CPP-specific type checking: use UniverseLibWrapper to get Il2CppType objects
+        // IL2CPP-specific type checking: use Il2CppType.Of to get Il2CppType objects
         try
         {
-            // If we can get Il2CppType for both, they're IL2CPP types
-            var targetIl2CppType = UniverseLibWrapper.GetIl2CppType(targetType);
-            var sourceIl2CppType = UniverseLibWrapper.GetIl2CppType(sourceType);
-            
-            if (targetIl2CppType != null && sourceIl2CppType != null)
+            // Use reflection to call Il2CppType.Of<T>() for both types
+            var ofMethod = typeof(Il2CppType).GetMethod("Of", BindingFlags.Public | BindingFlags.Static);
+            if (ofMethod != null)
             {
-                // Both are IL2CPP types, use the Il2CppType objects we already got
-                // This avoids calling Il2CppType.Of again which can cause type inference issues
-                return targetIl2CppType.IsAssignableFrom(sourceIl2CppType);
+                var targetGenericMethod = ofMethod.MakeGenericMethod(targetType);
+                var sourceGenericMethod = ofMethod.MakeGenericMethod(sourceType);
+                
+                var targetIl2CppType = targetGenericMethod.Invoke(null, new object[] { false }) as Type;
+                var sourceIl2CppType = sourceGenericMethod.Invoke(null, new object[] { false }) as Type;
+                
+                if (targetIl2CppType != null && sourceIl2CppType != null)
+                {
+                    return targetIl2CppType.IsAssignableFrom(sourceIl2CppType);
+                }
             }
         }
         catch

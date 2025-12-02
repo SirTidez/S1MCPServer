@@ -1,3 +1,6 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -65,9 +68,107 @@ public static class ProtocolHandler
     public static string SerializeResponse(Response response)
     {
         Utils.ModLogger.Debug($"SerializeResponse: Serializing response ID={response.Id}, has_error={response.Error != null}, has_result={response.Result != null}");
-        string json = JsonSerializer.Serialize(response, JsonOptions);
-        Utils.ModLogger.Debug($"SerializeResponse: Serialized to {json.Length} chars: {json}");
-        return json;
+        
+        // Sanitize the response to remove non-serializable types (like IntPtr) before serialization
+        var sanitizedResponse = SanitizeForSerialization(response);
+        
+        try
+        {
+            string json = JsonSerializer.Serialize(sanitizedResponse, JsonOptions);
+            Utils.ModLogger.Debug($"SerializeResponse: Serialized to {json.Length} chars: {json}");
+            return json;
+        }
+        catch (NotSupportedException ex) when (ex.Message.Contains("IntPtr"))
+        {
+            Utils.ModLogger.Error($"SerializeResponse: IntPtr detected in response - sanitization may have missed it. Error: {ex.Message}");
+            // Try to sanitize more aggressively and retry
+            var moreAggressiveSanitized = SanitizeForSerialization(sanitizedResponse, true);
+            return JsonSerializer.Serialize(moreAggressiveSanitized, JsonOptions);
+        }
+    }
+
+    /// <summary>
+    /// Recursively sanitizes an object graph to remove non-serializable types like IntPtr.
+    /// </summary>
+    private static object? SanitizeForSerialization(object? obj, bool aggressive = false)
+    {
+        if (obj == null)
+            return null;
+
+        var type = obj.GetType();
+
+        // Check if the type itself is IntPtr
+        if (type == typeof(IntPtr) || type == typeof(UIntPtr))
+            return aggressive ? "[IntPtr - not serializable]" : null;
+
+        // Handle dictionaries
+        if (obj is IDictionary dictionary)
+        {
+            var result = new Dictionary<string, object?>();
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                var key = entry.Key?.ToString();
+                if (key == null) continue;
+
+                var sanitizedValue = SanitizeForSerialization(entry.Value, aggressive);
+                if (sanitizedValue != null || aggressive)
+                {
+                    result[key] = sanitizedValue;
+                }
+            }
+            return result;
+        }
+
+        // Handle generic dictionaries
+        if (obj is IDictionary<object, object?> genericDict)
+        {
+            var result = new Dictionary<string, object?>();
+            foreach (var kvp in genericDict)
+            {
+                var key = kvp.Key?.ToString();
+                if (key == null) continue;
+
+                var sanitizedValue = SanitizeForSerialization(kvp.Value, aggressive);
+                if (sanitizedValue != null || aggressive)
+                {
+                    result[key] = sanitizedValue;
+                }
+            }
+            return result;
+        }
+
+        // Handle lists and collections
+        if (obj is IEnumerable enumerable && !(obj is string))
+        {
+            var result = new List<object?>();
+            foreach (var item in enumerable)
+            {
+                var sanitized = SanitizeForSerialization(item, aggressive);
+                if (sanitized != null || aggressive)
+                {
+                    result.Add(sanitized);
+                }
+            }
+            return result;
+        }
+
+        // For Response objects, sanitize the Result property
+        if (obj is Response response)
+        {
+            return new Response
+            {
+                Id = response.Id,
+                Result = SanitizeForSerialization(response.Result, aggressive),
+                Error = response.Error
+            };
+        }
+
+        // For primitives and strings, return as-is
+        if (type.IsPrimitive || type == typeof(string) || type == typeof(decimal))
+            return obj;
+
+        // For other objects, try to return as-is (they should be serializable)
+        return obj;
     }
 
     /// <summary>

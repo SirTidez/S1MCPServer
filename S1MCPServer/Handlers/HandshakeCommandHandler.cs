@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using S1MCPServer.Core;
-using S1MCPServer.Integrations;
 using S1MCPServer.Models;
 using S1MCPServer.Utils;
 
@@ -110,11 +109,6 @@ public class HandshakeCommandHandler : ICommandHandler
                 ["total_methods"] = availableMethods.Count,
                 ["available_methods"] = availableMethods,
                 ["method_categories"] = methodCategories,
-                ["integrations"] = new Dictionary<string, bool>
-                {
-                    ["unityexplorer"] = UnityExplorerIntegration.IsAvailable,
-                    ["universe_lib"] = UniverseLibWrapper.IsAvailable
-                },
                 ["instructions"] = instructions
             };
 

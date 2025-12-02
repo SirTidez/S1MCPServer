@@ -12,9 +12,6 @@
     </Target>
 
     <Target Name="Clean mod folder and copy requested mods" AfterTargets="PostBuildEvent" Condition="'$(RunPostBuildEvent)' == 'OnBuildSuccess'">
-        <Message Text="Cleaning mods directory: $(S1ModsDir)" Importance="high" />
-        <Exec Command='powershell -Command "Remove-Item \"$(S1ModsDir)\*\" -Recurse -Force"' />
-
         <Message Text="Checking if mods in ModList exist..." Importance="high" />
         <Exec WorkingDirectory="$(ProjectDir)"
               Command="powershell -Command &quot;&amp; { if (Test-Path '%(ModList.Identity)') { Copy-Item '%(ModList.Identity)' '$(S1ModsDir)' } else { Write-Host 'Mod not found: %(ModList.Identity)' } }&quot;" />

@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <Import Project="build/paths.props"/>
+    <!-- Local path overrides (git-ignored) - only imported if file exists -->
+    <Import Project="build/paths.local.props" Condition="Exists('build/paths.local.props')" />
 
     <PropertyGroup>
         <!-- Testing props -->
@@ -21,11 +23,6 @@
     <ItemGroup><!--<ModList Include="$(CommonDir)\Mods\DisclaimerSkipMono.dll" />-->
         <!--<ModList Include="$(CommonDir)\Mods\DisclaimerSkipIL2CPP.dll" />-->
     
-      <PackageReference Include="UniverseLib.IL2CPP.Interop" Version="1.5.1" />
-    
-      <PackageReference Include="UniverseLib.IL2CPP.Unhollower" Version="1.5.1" />
-    
-      <PackageReference Include="UniverseLib.Mono" Version="1.5.1" />
     </ItemGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Debug Mono'">
@@ -58,8 +55,6 @@
     <Import Project="build\references\MelonMono.targets"/>
     <Import Project="build\references\MelonIL2CPP.targets"/>
     
-    <!-- UniverseLib References -->
-    <Import Project="build\references\UniverseLib.targets"/>
 
     <!-- Events -->
     <Import Project="build\events\preBuild.targets"/>

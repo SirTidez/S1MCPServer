@@ -42,6 +42,9 @@ public class S1MCPServer : MelonMod
     {
         ModLogger.Info("S1MCPServer initialized");
 
+        // Initialize TypeResolver (scans assemblies for Component types)
+        TypeResolver.Initialize();
+
         // Initialize queues
         _commandQueue = new CommandQueue();
         _responseQueue = new ResponseQueue();

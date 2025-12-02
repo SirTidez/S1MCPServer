@@ -158,7 +158,7 @@ public static class Utils
 
     /// <summary>
     /// Checks if the given object is of type <typeparamref name="T"/> and casts it to that type.
-    /// Enhanced with UniverseLib for improved cross-runtime type checking.
+    /// Provides cross-runtime type checking.
     /// </summary>
     /// <param name="obj">The object to check.</param>
     /// <param name="result">The cast object if the check is successful; otherwise, null.</param>
@@ -166,7 +166,7 @@ public static class Utils
     /// <returns>True if the object is of type <typeparamref name="T"/>; otherwise, false.</returns>
     /// <remarks>
     /// Method adapted from S1API (https://github.com/KaBooMa/S1API/blob/stable/S1API/Internal/Utils/CrossType.cs)
-    /// Enhanced with UniverseLib for better IL2CPP support
+    /// Provides IL2CPP support
     /// </remarks>
     /// <example>
     /// <code>
@@ -184,38 +184,6 @@ public static class Utils
         where T : class
 #endif
     {
-        // Try UniverseLib type checking first if available
-        if (UniverseLibWrapper.IsAvailable)
-        {
-            try
-            {
-                // Use UniverseLib's type utilities for better cross-runtime support
-                var objType = obj?.GetType();
-                var targetType = typeof(T);
-                
-                if (objType != null && targetType.IsAssignableFrom(objType))
-                {
-#if !MONO
-                    if (obj is Object il2CppObj1)
-                    {
-                        result = il2CppObj1.TryCast<T>()!;
-                        return result != null;
-                    }
-#else
-                    if (obj is T t)
-                    {
-                        result = t;
-                        return true;
-                    }
-#endif
-                }
-            }
-            catch
-            {
-                // Fallback to standard type checking
-            }
-        }
-
 #if !MONO
         if (obj is Object il2CppObj)
         {

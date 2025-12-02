@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using S1MCPServer.Handlers;
+using S1MCPServer.Handlers.Debug;
 using S1MCPServer.Models;
 using S1MCPServer.Utils;
 
@@ -34,12 +35,13 @@ public class CommandRouter
         _handlers["get_npc"] = new NPCCommandHandler(_responseQueue);
         _handlers["list_npcs"] = new NPCCommandHandler(_responseQueue);
         _handlers["get_npc_position"] = new NPCCommandHandler(_responseQueue);
+        _handlers["inspect_npc_dealer"] = new NPCCommandHandler(_responseQueue);
         _handlers["get_player"] = new PlayerCommandHandler(_responseQueue);
         _handlers["get_player_inventory"] = new PlayerCommandHandler(_responseQueue);
         _handlers["list_items"] = new ItemCommandHandler(_responseQueue);
         _handlers["get_item"] = new ItemCommandHandler(_responseQueue);
         _handlers["list_properties"] = new PropertyCommandHandler(_responseQueue);
-        _handlers["get_property"] = new PropertyCommandHandler(_responseQueue);
+        _handlers["get_property"] = new PropertyCommandHandler(_responseQueue); // Game properties (buildings)
         _handlers["get_game_state"] = new GameStateCommandHandler(_responseQueue);
 
         // Phase 3 handlers (write operations)
@@ -53,11 +55,43 @@ public class CommandRouter
         _handlers["list_vehicles"] = new VehicleCommandHandler(_responseQueue);
         _handlers["get_vehicle"] = new VehicleCommandHandler(_responseQueue);
         
-        // Debug handlers (enhanced with UniverseLib and UnityExplorer integration)
-        _handlers["inspect_object"] = new DebugCommandHandler(_responseQueue);
-        _handlers["inspect_type"] = new DebugCommandHandler(_responseQueue);
-        _handlers["find_objects_by_type"] = new DebugCommandHandler(_responseQueue);
-        _handlers["get_scene_objects"] = new DebugCommandHandler(_responseQueue);
+        // Debug handlers - modularized into separate handlers
+        var discoveryHandler = new DebugDiscoveryHandler(_responseQueue);
+        _handlers["find_gameobjects"] = discoveryHandler;
+        _handlers["search_types"] = discoveryHandler;
+        _handlers["get_scene_hierarchy"] = discoveryHandler;
+        _handlers["list_scenes"] = discoveryHandler;
+        
+        var objectInspectionHandler = new DebugObjectInspectionHandler(_responseQueue);
+        _handlers["inspect_object"] = objectInspectionHandler;
+        
+        var componentInspectionHandler = new DebugComponentInspectionHandler(_responseQueue);
+        _handlers["inspect_component"] = componentInspectionHandler;
+        _handlers["list_components"] = componentInspectionHandler;
+        _handlers["get_component_by_type"] = componentInspectionHandler;
+        _handlers["get_member_value"] = componentInspectionHandler;
+        
+        var typeInspectionHandler = new DebugTypeInspectionHandler(_responseQueue);
+        _handlers["inspect_type"] = typeInspectionHandler;
+        _handlers["list_members"] = typeInspectionHandler;
+        
+        var hierarchyHandler = new DebugHierarchyHandler(_responseQueue);
+        _handlers["get_hierarchy"] = hierarchyHandler;
+        _handlers["find_objects_by_type"] = hierarchyHandler;
+        _handlers["get_scene_objects"] = hierarchyHandler;
+        
+        var accessHandler = new DebugAccessHandler(_responseQueue);
+        _handlers["get_field"] = accessHandler;
+        _handlers["get_component_property"] = accessHandler; // Component properties (not game properties)
+        _handlers["is_active"] = accessHandler;
+        _handlers["get_transform"] = accessHandler;
+        
+        var modificationHandler = new DebugModificationHandler(_responseQueue);
+        _handlers["set_field"] = modificationHandler;
+        _handlers["set_component_property"] = modificationHandler; // Component properties
+        _handlers["call_method"] = modificationHandler;
+        _handlers["set_active"] = modificationHandler;
+        _handlers["set_transform"] = modificationHandler;
 
         ModLogger.Info($"Initialized {_handlers.Count} command handlers");
     }

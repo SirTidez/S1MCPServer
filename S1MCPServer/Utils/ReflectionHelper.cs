@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 using UnityEngine;
 #if !MONO
@@ -10,43 +11,39 @@ namespace S1MCPServer.Utils;
 /// <summary>
 /// Provides reflection utilities for accessing Unity GameObjects and components.
 /// Handles both Mono and IL2CPP backends using conditional compilation.
-/// Enhanced with UniverseLib for improved cross-runtime compatibility.
 /// </summary>
 public static class ReflectionHelper
 {
     /// <summary>
-    /// Finds a GameObject by name (works in both Mono and IL2CPP).
-    /// Uses UniverseLib for enhanced cross-runtime support when available.
+    /// Finds a GameObject by name.
     /// </summary>
     /// <param name="name">The name of the GameObject to find.</param>
+    /// <param name="includeDisabled">If true, includes inactive GameObjects in the search.</param>
     /// <returns>The GameObject if found, null otherwise.</returns>
-    public static GameObject? FindGameObject(string name)
+    public static GameObject? FindGameObject(string name, bool includeDisabled = false)
     {
-        // Try UniverseLib first if available
-        var universeLibResult = UniverseLibWrapper.FindGameObjectByName(name);
-        if (universeLibResult != null)
-            return universeLibResult;
-
-#if MONO
-        return GameObject.Find(name);
-#else
-        // IL2CPP: Use Resources.FindObjectsOfTypeAll to find all GameObjects
-        // Then filter by name
-        var allObjects = Resources.FindObjectsOfTypeAll<GameObject>();
-        foreach (var obj in allObjects)
+        if (!includeDisabled)
         {
-            if (obj.name == name)
+            // Use GameObject.Find for active objects only
+            return GameObject.Find(name);
+        }
+        else
+        {
+            // Find all objects in scene, including inactive ones
+            var allObjects = Resources.FindObjectsOfTypeAll<GameObject>();
+            foreach (var obj in allObjects)
             {
-                return obj;
+                if (obj.name == name)
+                {
+                    return obj;
+                }
             }
         }
         return null;
-#endif
     }
 
     /// <summary>
     /// Gets a component of type T from a GameObject (handles both Mono and IL2CPP).
-    /// Uses UniverseLib for enhanced cross-runtime type handling when available.
     /// </summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="obj">The GameObject to get the component from.</param>
@@ -58,51 +55,57 @@ public static class ReflectionHelper
             return null;
         }
 
-        // Try UniverseLib first if available
-        var universeLibResult = UniverseLibWrapper.GetComponent<T>(obj);
-        if (universeLibResult != null)
-            return universeLibResult;
-
-#if MONO
         return obj.GetComponent<T>();
-#else
-        // IL2CPP: Il2CppInterop should handle GetComponent<T>() directly
-        // If that doesn't work, fall back to reflection-based approach
+    }
+
+    /// <summary>
+    /// Gets a component of the specified type from a GameObject (non-generic version).
+    /// </summary>
+    /// <param name="obj">The GameObject to get the component from.</param>
+    /// <param name="componentType">The type of component to get.</param>
+    /// <returns>The component if found, null otherwise.</returns>
+    public static Component? GetComponent(GameObject obj, Type componentType)
+    {
+        if (obj == null || componentType == null || !typeof(Component).IsAssignableFrom(componentType))
+        {
+            return null;
+        }
+
+        // Use reflection to call the generic GetComponent<T> method
         try
         {
-            return obj.GetComponent<T>();
+            var method = typeof(ReflectionHelper).GetMethods()
+                .FirstOrDefault(m => m.Name == "GetComponent" && 
+                                    m.IsGenericMethod && 
+                                    m.GetParameters().Length == 1 &&
+                                    m.GetParameters()[0].ParameterType == typeof(GameObject));
+            
+            if (method != null)
+            {
+                var genericMethod = method.MakeGenericMethod(componentType);
+                var component = genericMethod.Invoke(null, new object[] { obj });
+                return component as Component;
+            }
         }
         catch
         {
-            // Fallback: Use reflection to call GetComponent
+            // Fallback: Try Unity's non-generic GetComponent(Type) if available
             try
             {
-                var method = typeof(GameObject).GetMethod("GetComponent", new[] { typeof(Type) });
-                if (method != null)
+                var unityMethod = typeof(GameObject).GetMethod("GetComponent", new[] { typeof(Type) });
+                if (unityMethod != null)
                 {
-                    var component = method.Invoke(obj, new object[] { typeof(T) });
-                    if (component != null)
-                    {
-                        // In IL2CPP, component should be an Il2CppSystem.Object, use TryCast
-                        if (component is Object il2CppComponent)
-                        {
-                            return il2CppComponent.TryCast<T>();
-                        }
-                        // Fallback: try direct cast
-                        if (component is T directCast)
-                        {
-                            return directCast;
-                        }
-                    }
+                    var component = unityMethod.Invoke(obj, new object[] { componentType });
+                    return component as Component;
                 }
             }
             catch
             {
-                // Component not found or method not available
+                // Method not available
             }
-            return null;
         }
-#endif
+
+        return null;
     }
 
     /// <summary>
@@ -138,7 +141,6 @@ public static class ReflectionHelper
 
     /// <summary>
     /// Gets the value of a private field from an object using reflection.
-    /// Uses UniverseLib for enhanced cross-runtime field access when available.
     /// </summary>
     /// <param name="obj">The object to get the field from.</param>
     /// <param name="fieldName">The name of the field.</param>
@@ -150,11 +152,6 @@ public static class ReflectionHelper
             return null;
         }
 
-        // Try UniverseLib first if available
-        var universeLibResult = UniverseLibWrapper.GetFieldValue(obj, obj.GetType(), fieldName, true);
-        if (universeLibResult != null)
-            return universeLibResult;
-
         var field = obj.GetType().GetField(
             fieldName,
             BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static
@@ -165,29 +162,15 @@ public static class ReflectionHelper
 
     /// <summary>
     /// Gets the value of a private property from an object using reflection.
-    /// Uses UniverseLib for enhanced cross-runtime property access when available.
+    /// Uses TryGetFieldOrProperty to handle Mono/IL2CPP differences.
     /// </summary>
     /// <param name="obj">The object to get the property from.</param>
     /// <param name="propertyName">The name of the property.</param>
     /// <returns>The property value, or null if not found.</returns>
     public static object? GetPrivateProperty(object obj, string propertyName)
     {
-        if (obj == null)
-        {
-            return null;
-        }
-
-        // Try UniverseLib first if available
-        var universeLibResult = UniverseLibWrapper.GetPropertyValue(obj, obj.GetType(), propertyName, true);
-        if (universeLibResult != null)
-            return universeLibResult;
-
-        var property = obj.GetType().GetProperty(
-            propertyName,
-            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static
-        );
-
-        return property?.GetValue(obj);
+        // Use TryGetFieldOrProperty to handle Mono/IL2CPP differences
+        return TryGetFieldOrProperty(obj, propertyName);
     }
 
     /// <summary>
@@ -213,19 +196,193 @@ public static class ReflectionHelper
     }
 
     /// <summary>
+    /// Attempts to get a field or property value from an object using reflection.
+    /// Tries field first, then property. Handles both public and non-public members.
+    /// Fields on Mono are typically properties on IL2CPP.
+    /// </summary>
+    /// <param name="target">The target object to get the member from.</param>
+    /// <param name="memberName">The name of the field or property.</param>
+    /// <returns>The value of the member, or null if not found or inaccessible.</returns>
+    public static object? TryGetFieldOrProperty(object target, string memberName)
+    {
+        if (target == null) return null;
+        var type = target.GetType();
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        
+        // Try field first
+        var fi = type.GetField(memberName, flags);
+        if (fi != null)
+        {
+            try
+            {
+                return fi.GetValue(target);
+            }
+            catch { }
+        }
+        
+        // Try property
+        var pi = type.GetProperty(memberName, flags);
+        if (pi != null && pi.CanRead)
+        {
+            try
+            {
+                return pi.GetValue(target);
+            }
+            catch { }
+        }
+        
+        return null;
+    }
+
+    /// <summary>
+    /// Attempts to set a field or property on an object using reflection.
+    /// Tries field first, then property. Handles both public and non-public members.
+    /// Fields on Mono are typically properties on IL2CPP.
+    /// </summary>
+    /// <param name="target">The target object to set the member on.</param>
+    /// <param name="memberName">The name of the field or property.</param>
+    /// <param name="value">The value to set.</param>
+    /// <returns>True if the member was successfully set; otherwise, false.</returns>
+    public static bool TrySetFieldOrProperty(object target, string memberName, object? value)
+    {
+        if (target == null) return false;
+        var type = target.GetType();
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        
+        // Try field first
+        var fi = type.GetField(memberName, flags);
+        if (fi != null)
+        {
+            try
+            {
+                if (value == null || fi.FieldType.IsInstanceOfType(value))
+                {
+                    fi.SetValue(target, value);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        
+        // Try property
+        var pi = type.GetProperty(memberName, flags);
+        if (pi != null && pi.CanWrite)
+        {
+            try
+            {
+                if (value == null || pi.PropertyType.IsInstanceOfType(value))
+                {
+                    pi.SetValue(target, value);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to get a static field or property value from a type using reflection.
+    /// Tries field first, then property. Handles both public and non-public members.
+    /// Fields on Mono are typically properties on IL2CPP.
+    /// </summary>
+    /// <param name="type">The type to get the static member from.</param>
+    /// <param name="memberName">The name of the field or property.</param>
+    /// <returns>The value of the member, or null if not found or inaccessible.</returns>
+    public static object? TryGetStaticFieldOrProperty(Type type, string memberName)
+    {
+        if (type == null) return null;
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        
+        // Try field first
+        var fi = type.GetField(memberName, flags);
+        if (fi != null)
+        {
+            try
+            {
+                return fi.GetValue(null);
+            }
+            catch { }
+        }
+        
+        // Try property
+        var pi = type.GetProperty(memberName, flags);
+        if (pi != null && pi.CanRead)
+        {
+            try
+            {
+                return pi.GetValue(null);
+            }
+            catch { }
+        }
+        
+        return null;
+    }
+
+    /// <summary>
+    /// Attempts to set a static field or property value on a type using reflection.
+    /// Tries field first, then property. Handles both public and non-public members.
+    /// Fields on Mono are typically properties on IL2CPP.
+    /// </summary>
+    /// <param name="type">The type to set the static member on.</param>
+    /// <param name="memberName">The name of the field or property.</param>
+    /// <param name="value">The value to set.</param>
+    /// <returns>True if the member was successfully set; otherwise, false.</returns>
+    public static bool TrySetStaticFieldOrProperty(Type type, string memberName, object? value)
+    {
+        if (type == null) return false;
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        
+        // Try field first
+        var fi = type.GetField(memberName, flags);
+        if (fi != null)
+        {
+            try
+            {
+                if (value == null || fi.FieldType.IsInstanceOfType(value))
+                {
+                    fi.SetValue(null, value);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        
+        // Try property
+        var pi = type.GetProperty(memberName, flags);
+        if (pi != null && pi.CanWrite)
+        {
+            try
+            {
+                if (value == null || pi.PropertyType.IsInstanceOfType(value))
+                {
+                    pi.SetValue(null, value);
+                    return true;
+                }
+            }
+            catch { }
+        }
+        
+        return false;
+    }
+
+    /// <summary>
     /// Safely gets a field value, handling both Mono and IL2CPP types.
+    /// Uses TryGetFieldOrProperty to handle Mono/IL2CPP differences.
     /// </summary>
     /// <param name="obj">The object to get the field from.</param>
     /// <param name="fieldName">The name of the field.</param>
     /// <returns>The field value, or null if not found.</returns>
     public static object? GetFieldValue(object obj, string fieldName)
     {
-        return GetPrivateField(obj, fieldName);
+        // Use TryGetFieldOrProperty to handle Mono/IL2CPP differences
+        return TryGetFieldOrProperty(obj, fieldName);
     }
 
     /// <summary>
     /// Safely sets a field value, handling both Mono and IL2CPP types.
-    /// Uses UniverseLib for enhanced cross-runtime field setting when available.
+    /// Uses TrySetFieldOrProperty to handle Mono/IL2CPP differences.
     /// </summary>
     /// <param name="obj">The object to set the field on.</param>
     /// <param name="fieldName">The name of the field.</param>
@@ -233,76 +390,26 @@ public static class ReflectionHelper
     /// <returns>True if the field was set successfully, false otherwise.</returns>
     public static bool SetFieldValue(object obj, string fieldName, object? value)
     {
-        if (obj == null)
-        {
-            return false;
-        }
-
-        // Try UniverseLib first if available
-        if (UniverseLibWrapper.SetFieldValue(obj, obj.GetType(), fieldName, value, true))
-            return true;
-
-        try
-        {
-            var field = obj.GetType().GetField(
-                fieldName,
-                BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static
-            );
-
-            if (field != null)
-            {
-#if MONO
-                if (field.CanWrite)
-                {
-                    field.SetValue(obj, value);
-                    return true;
-                }
-#else
-                // IL2CPP: Try to set value directly (CanWrite might not be available)
-                try
-                {
-                    field.SetValue(obj, value);
-                    return true;
-                }
-                catch
-                {
-                    // Field cannot be written
-                }
-#endif
-            }
-        }
-        catch
-        {
-            // Field not found or cannot be written
-        }
-
-        return false;
+        // Use TrySetFieldOrProperty to handle Mono/IL2CPP differences
+        return TrySetFieldOrProperty(obj, fieldName, value);
     }
 
     /// <summary>
-    /// Finds all GameObjects in the scene (enhanced with UniverseLib when available).
+    /// Finds all GameObjects in the scene.
     /// </summary>
     /// <returns>List of all GameObjects in the scene.</returns>
     public static List<GameObject> FindAllGameObjects()
     {
         var results = new List<GameObject>();
 
-        // Try UniverseLib first if available
-        var universeLibObjects = UniverseLibWrapper.GetAllGameObjects();
-        if (universeLibObjects != null)
-        {
-            results.AddRange(universeLibObjects);
-            return results;
-        }
-
-        // Fallback: Use Resources.FindObjectsOfTypeAll
+        // Use Resources.FindObjectsOfTypeAll
         var objects = Resources.FindObjectsOfTypeAll<GameObject>();
         results.AddRange(objects);
         return results;
     }
 
     /// <summary>
-    /// Finds GameObjects by type (enhanced with UniverseLib when available).
+    /// Finds GameObjects by type.
     /// </summary>
     /// <typeparam name="T">The component type to search for.</typeparam>
     /// <returns>List of GameObjects with the specified component type.</returns>
@@ -310,21 +417,7 @@ public static class ReflectionHelper
     {
         var results = new List<GameObject>();
 
-        // Try UniverseLib first if available
-        var universeLibComponents = UniverseLibWrapper.FindObjectsOfTypeAll<T>();
-        if (universeLibComponents != null)
-        {
-            foreach (var component in universeLibComponents)
-            {
-                if (component != null && component is Component comp && comp.gameObject != null)
-                {
-                    results.Add(comp.gameObject);
-                }
-            }
-            return results;
-        }
-
-        // Fallback: Use standard Unity methods
+        // Use standard Unity methods
 #if MONO
         var components = UnityEngine.Object.FindObjectsOfType<T>();
 #else

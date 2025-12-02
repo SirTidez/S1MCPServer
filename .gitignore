@@ -4,3 +4,4 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 /.idea
+S1MCPServer/build/paths.local.props
