@@ -228,6 +228,12 @@ S1MCPClient exposes a comprehensive set of tools for game interaction:
 ### Game State Tools
 - `s1_get_game_state` - Get current game state (scene, network, mods, version)
 
+### Log Tools
+- `s1_capture_logs` - Capture and filter game logs from MelonLoader for debugging
+  - Filter by keyword, timestamp range, regex patterns
+  - Get first/last N lines
+  - Essential for agentic debugging
+
 ### Debug Tools
 - `s1_inspect_object` - Inspect Unity GameObject using reflection
 
@@ -365,12 +371,18 @@ Allow LLM agents to diagnose mod issues:
 - Check if NPCs are spawning correctly
 - Verify item registration
 - Inspect mod interactions
+- Capture and analyze game logs to track errors
 
 **Example:**
 ```
 User: "My mod isn't spawning NPCs correctly. Can you check what NPCs are currently in the game?"
 
 LLM: [Calls s1_list_npcs] I found 15 NPCs. Here are the ones that might be relevant...
+
+User: "The mod crashed at startup. Can you check the logs?"
+
+LLM: [Calls s1_capture_logs with keyword="error"] I found several errors in the logs around the startup time. 
+The issue appears to be...
 ```
 
 ### 2. Game State Inspection

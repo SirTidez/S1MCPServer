@@ -224,6 +224,33 @@ Get current game state information including scene, game time, network status, g
 
 **Parameters:** None
 
+### Log Tools
+
+#### `s1_capture_logs`
+Capture and filter game logs from MelonLoader for debugging. Retrieves logs from the game's Latest.log file with optional filtering by keywords, timestamps, regex patterns, and line count limits. Essential for agentic debugging to diagnose issues, track errors, and understand game behavior.
+
+**Parameters:**
+- `last_n_lines` (integer, optional): Get the last N lines from the log file. Cannot be used with first_n_lines.
+- `first_n_lines` (integer, optional): Get the first N lines from the log file. Cannot be used with last_n_lines.
+- `keyword` (string, optional): Filter logs by keyword (case-insensitive search). Returns only lines containing this keyword.
+- `from_timestamp` (string, optional): Filter logs from this timestamp onwards. Format: HH:mm:ss or HH:mm:ss.fff (e.g., '12:30:45' or '12:30:45.123')
+- `to_timestamp` (string, optional): Filter logs up to this timestamp. Format: HH:mm:ss or HH:mm:ss.fff (e.g., '12:35:00' or '12:35:00.999')
+- `include_pattern` (string, optional): Regex pattern to include matching lines (case-insensitive). Only lines matching this pattern will be returned.
+- `exclude_pattern` (string, optional): Regex pattern to exclude matching lines (case-insensitive). Lines matching this pattern will be filtered out.
+
+**Example:**
+```json
+{
+  "last_n_lines": 100,
+  "keyword": "error"
+}
+```
+
+**Common Use Cases:**
+- Find all recent errors: `{"keyword": "error", "last_n_lines": 50}`
+- Debug specific time window: `{"from_timestamp": "12:00:00", "to_timestamp": "12:05:00", "keyword": "S1MCPServer"}`
+- Filter by pattern: `{"include_pattern": "ERROR|WARN", "exclude_pattern": "DEBUG", "last_n_lines": 200}`
+
 ### Debug Tools
 
 #### `s1_inspect_object`

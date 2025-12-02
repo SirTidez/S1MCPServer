@@ -79,6 +79,12 @@ Main scene loaded - S1MCPServer is active
 #### Game State Commands
 - `get_game_state` - Get current game state (scene, network status, mods)
 
+#### Log Commands
+- `capture_logs` - Capture and filter game logs for debugging
+  - Supports keyword search, timestamp filtering, regex patterns
+  - Line count limiting (first/last N lines)
+  - Reads from MelonLoader's Latest.log file
+
 #### Debug Commands
 - `inspect_object` - Inspect Unity GameObject using reflection
 
