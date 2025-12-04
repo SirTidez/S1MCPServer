@@ -21,6 +21,7 @@ from .tools import game_state_tools
 from .tools import debug_tools
 from .tools import log_tools
 from .tools import game_lifecycle_tools
+from .tools import load_manager_tools
 
 
 # Global TCP client instance
@@ -159,6 +160,15 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
         logger.debug(f"Loaded {len(tools)} game lifecycle tools")
     except Exception as e:
         logger.error(f"Error loading game lifecycle tools: {e}", exc_info=True)
+    
+    # LoadManager tools
+    try:
+        tools = load_manager_tools.get_load_manager_tools(tcp_client)
+        all_tools.extend(tools)
+        all_tool_handlers.update(load_manager_tools.TOOL_HANDLERS)
+        logger.debug(f"Loaded {len(tools)} LoadManager tools")
+    except Exception as e:
+        logger.error(f"Error loading LoadManager tools: {e}", exc_info=True)
     
     # Log tool collection
     logger.info(f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}")

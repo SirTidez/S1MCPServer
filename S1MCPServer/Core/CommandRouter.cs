@@ -58,6 +58,10 @@ public class CommandRouter
         // Log handlers
         _handlers["capture_logs"] = new LogCommandHandler(_responseQueue);
         
+        // LoadManager handlers
+        _handlers["list_saves"] = new LoadManagerCommandHandler(_responseQueue);
+        _handlers["load_save"] = new LoadManagerCommandHandler(_responseQueue);
+        
         // Debug handlers - modularized into separate handlers
         var discoveryHandler = new DebugDiscoveryHandler(_responseQueue);
         _handlers["find_gameobjects"] = discoveryHandler;

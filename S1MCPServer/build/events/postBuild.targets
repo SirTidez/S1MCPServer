@@ -27,18 +27,5 @@
     <Target Name="Copy built mod and run the game" AfterTargets="PostBuildEvent" Condition="'$(RunPostBuildEvent)' == 'OnBuildSuccess'">
         <Message Text="Copying built mod to mods directory..." Importance="high" />
         <Exec Command='copy "$(TargetPath)" "$(S1ModsDir)"'/>
-
-        <Message Condition="'$(IsMultiplayerTest)' != 'true'" Text="Launching game: $(S1ExePath)" Importance="high" />
-        <!-- DEBUG defined: run with melonloader debugging -->
-        <Exec Condition="'$(IsMultiplayerTest)' != 'true' and $(DefineConstants.Contains('DEBUG'))"
-            Command="powershell -Command &quot;Start-Process -FilePath '&quot;$(S1ExePath)&quot;' -ArgumentList '--melonloader.launchdebugger','--melonloader.debug'&quot;" />
-
-        <!-- DEBUG not defined: normal launch -->
-        <Exec Condition="'$(IsMultiplayerTest)' != 'true' and !$(DefineConstants.Contains('DEBUG'))"
-            Command="powershell -Command &quot;Start-Process -FilePath '&quot;$(S1ExePath)&quot;'&quot;" />
-
-        <Message Condition="'$(IsMultiplayerTest)' == 'true'" Text="Multiplayer mode: launching mod starter..." Importance="high" />
-        <Exec Condition="'$(IsMultiplayerTest)' == 'true'"
-              Command='powershell -Command "Start-Process -FilePath \"$(MultiplayerModStarter)\" -WorkingDirectory \"$(S1Dir)\""' />
     </Target>
 </Project>
