@@ -35,7 +35,6 @@ public class CommandRouter
         _handlers["get_npc"] = new NPCCommandHandler(_responseQueue);
         _handlers["list_npcs"] = new NPCCommandHandler(_responseQueue);
         _handlers["get_npc_position"] = new NPCCommandHandler(_responseQueue);
-        _handlers["inspect_npc_dealer"] = new NPCCommandHandler(_responseQueue);
         _handlers["get_player"] = new PlayerCommandHandler(_responseQueue);
         _handlers["get_player_inventory"] = new PlayerCommandHandler(_responseQueue);
         _handlers["list_items"] = new ItemCommandHandler(_responseQueue);

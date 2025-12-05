@@ -22,6 +22,7 @@ from .tools import debug_tools
 from .tools import log_tools
 from .tools import game_lifecycle_tools
 from .tools import load_manager_tools
+from .tools import s1api_docs_tools
 
 
 # Global TCP client instance
@@ -34,7 +35,7 @@ logger = get_logger()
 
 
 # Lifecycle tools that don't require game connection
-LIFECYCLE_TOOLS = {"s1_launch_game", "s1_close_game", "s1_get_game_process_info"}
+LIFECYCLE_TOOLS = {"s1_launch_game", "s1_close_game", "s1_get_game_process_info", "s1_search_s1api_docs"}
 
 
 def can_call_tool(tool_name: str) -> tuple[bool, str]:
@@ -169,6 +170,15 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
         logger.debug(f"Loaded {len(tools)} LoadManager tools")
     except Exception as e:
         logger.error(f"Error loading LoadManager tools: {e}", exc_info=True)
+    
+    # S1API documentation tools
+    try:
+        tools = s1api_docs_tools.get_s1api_docs_tools(tcp_client)
+        all_tools.extend(tools)
+        all_tool_handlers.update(s1api_docs_tools.TOOL_HANDLERS)
+        logger.debug(f"Loaded {len(tools)} S1API documentation tools")
+    except Exception as e:
+        logger.error(f"Error loading S1API documentation tools: {e}", exc_info=True)
     
     # Log tool collection
     logger.info(f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}")
