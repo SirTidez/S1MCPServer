@@ -46,7 +46,8 @@ TOOL = Tool(
                 "description": "Spawn coordinates (spawn only)"
             },
             "quantity": {
-                "type": "number",
+                "type": "integer",
+                "minimum": 1,
                 "description": "Number to spawn (spawn only, default: 1)",
                 "default": 1
             }
@@ -90,8 +91,8 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
     except Exception as e:
-        logger.error(f"Error in s1_item/{action}: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        logger.exception(f"Error in s1_item/{action}")
+        return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 
 
 TOOL_HANDLERS = {TOOL_NAME: handle}

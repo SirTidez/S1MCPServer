@@ -52,7 +52,7 @@ def can_call_tool(tool_name: str) -> tuple[bool, str]:
     # All other tools require game connection
     if not is_connected:
         return False, (
-            "Error: Game is not connected. Please launch the game first using s1_launch_game.\n"
+            "Error: Game is not connected. Use s1_game with action='launch' to start the game.\n"
             "Once the game is running and connected, you can use other game tools."
         )
     
@@ -88,6 +88,10 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
     for name, loader, handlers in tool_modules:
         try:
             tools = loader()
+            conflicts = set(handlers.keys()) & set(all_tool_handlers.keys())
+            if conflicts:
+                logger.error(f"Handler key collision in module '{name}': {conflicts}")
+                raise ValueError(f"Duplicate tool handler keys: {conflicts}")
             all_tools.extend(tools)
             all_tool_handlers.update(handlers)
             logger.debug(f"Loaded tool: {name}")

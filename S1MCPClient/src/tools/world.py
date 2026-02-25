@@ -162,8 +162,8 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
     except Exception as e:
-        logger.error(f"Error in s1_world/{action}: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        logger.exception(f"Error in s1_world/{action}")
+        return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 
 
 def _format_logs(result) -> list[TextContent]:
@@ -185,9 +185,12 @@ def _format_logs(result) -> list[TextContent]:
     if lines:
         out.append("\n--- Log Lines ---")
         for lo in lines:
-            ln = lo.get("line_number", "?")
-            ts = lo.get("timestamp", "")
-            content = lo.get("content", "")
+            if isinstance(lo, dict):
+                ln = lo.get("line_number", "?")
+                ts = lo.get("timestamp", "")
+                content = lo.get("content", "")
+            else:
+                ln, ts, content = "?", "", str(lo)
             out.append(f"[{ln}]{f' [{ts}]' if ts else ''} {content}")
     else:
         out.append("(No lines matched)")

@@ -61,51 +61,31 @@ TOOL = Tool(
     }
 )
 
-
-# Config is stored at module level when the tool is set up
-_config: Config | None = None
-
-
-def set_config(config: Config) -> None:
-    global _config
-    _config = config
-
-
-async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextContent]:
-    action = arguments.get("action")
-
-    try:
-        if action == "launch":
-            if not _config:
-                return [TextContent(type="text", text="Error: Config not initialized")]
-            return await handle_s1_launch_game(arguments, tcp_client, _config)
-
-        elif action == "close":
-            if not _config:
-                return [TextContent(type="text", text="Error: Config not initialized")]
-            return await handle_s1_close_game(arguments, tcp_client, _config)
-
-        elif action == "process_info":
-            if not _config:
-                return [TextContent(type="text", text="Error: Config not initialized")]
-            return await handle_s1_get_game_process_info(arguments, tcp_client, _config)
-
-        elif action == "search_docs":
-            if not arguments.get("topic"):
-                return [TextContent(type="text", text="Error: topic is required for search_docs")]
-            return await handle_s1_search_s1api_docs(arguments, tcp_client)
-
-        else:
-            return [TextContent(type="text", text=f"Error: Unknown action '{action}'")]
-
-    except Exception as e:
-        logger.error(f"Error in s1_game/{action}: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
-
-
-TOOL_HANDLERS = {TOOL_NAME: handle}
+# TOOL_HANDLERS is populated by get_tools() with a config-capturing closure.
+TOOL_HANDLERS: Dict[str, Any] = {}
 
 
 def get_tools(tcp_client: TcpClient, config: Config) -> list[Tool]:
-    set_config(config)
+    """Register tools, capturing config in a closure so no module-level global is needed."""
+
+    async def handle(arguments: Dict[str, Any], tcp_client_: TcpClient) -> list[TextContent]:
+        action = arguments.get("action")
+        try:
+            if action == "launch":
+                return await handle_s1_launch_game(arguments, tcp_client_, config)
+            elif action == "close":
+                return await handle_s1_close_game(arguments, tcp_client_, config)
+            elif action == "process_info":
+                return await handle_s1_get_game_process_info(arguments, tcp_client_, config)
+            elif action == "search_docs":
+                if not arguments.get("topic"):
+                    return [TextContent(type="text", text="Error: topic is required for search_docs")]
+                return await handle_s1_search_s1api_docs(arguments, tcp_client_)
+            else:
+                return [TextContent(type="text", text=f"Error: Unknown action '{action}'")]
+        except Exception:
+            logger.exception(f"Error in s1_game/{action}")
+            return [TextContent(type="text", text="An internal error occurred while processing your request.")]
+
+    TOOL_HANDLERS[TOOL_NAME] = handle
     return [TOOL]

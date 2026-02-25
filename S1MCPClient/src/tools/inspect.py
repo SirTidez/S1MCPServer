@@ -70,7 +70,7 @@ TOOL = Tool(
             },
             "type_name": {
                 "type": "string",
-                "description": "Type name for find_by_type / inspect_type / list_members"
+                "description": "Type name for inspect_type / list_members"
             },
             "member_path": {
                 "type": "string",
@@ -95,9 +95,9 @@ TOOL = Tool(
                 "type": "array",
                 "description": "Arguments for call_method"
             },
-            "name": {
+            "name_pattern": {
                 "type": "string",
-                "description": "Name filter for find_objects"
+                "description": "Name substring filter for find_objects (case-insensitive)"
             },
             "tag": {
                 "type": "string",
@@ -107,13 +107,13 @@ TOOL = Tool(
                 "type": "string",
                 "description": "Layer filter for find_objects"
             },
-            "query": {
+            "pattern": {
                 "type": "string",
-                "description": "Search query for search_types"
+                "description": "Type name pattern to search for (search_types)"
             },
-            "include_non_public": {
+            "component_types_only": {
                 "type": "boolean",
-                "description": "Include non-public types in search_types"
+                "description": "Limit search_types results to Component subclasses only"
             },
             "include_inactive": {
                 "type": "boolean",
@@ -184,23 +184,23 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
     # Build (method, params) pairs for each action
     try:
         if action == "find_objects":
-            params = {k: arguments[k] for k in ("name", "tag", "layer", "component_type") if k in arguments}
+            params = {k: arguments[k] for k in ("name_pattern", "tag", "layer", "component_type") if k in arguments}
             resp = await tcp_client.async_call("find_gameobjects", params or {})
 
         elif action == "find_by_type":
-            if err := _req(arguments, "type_name"):
+            if err := _req(arguments, "component_type"):
                 return [TextContent(type="text", text=err)]
-            params = {"type_name": arguments["type_name"]}
+            params = {"component_type": arguments["component_type"]}
             if "include_inactive" in arguments:
                 params["include_inactive"] = arguments["include_inactive"]
             resp = await tcp_client.async_call("find_objects_by_type", params)
 
         elif action == "search_types":
-            if err := _req(arguments, "query"):
+            if err := _req(arguments, "pattern"):
                 return [TextContent(type="text", text=err)]
-            params = {"query": arguments["query"]}
-            if "include_non_public" in arguments:
-                params["include_non_public"] = arguments["include_non_public"]
+            params = {"pattern": arguments["pattern"]}
+            if "component_types_only" in arguments:
+                params["component_types_only"] = arguments["component_types_only"]
             resp = await tcp_client.async_call("search_types", params)
 
         elif action == "list_scenes":
@@ -245,8 +245,8 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
             params = {"object_name": arguments["object_name"]}
             if ct := arguments.get("component_type"):
                 params["component_type"] = ct
-            if md := arguments.get("max_depth"):
-                params["max_depth"] = md
+            if "max_depth" in arguments:
+                params["max_depth"] = arguments["max_depth"]
             resp = await tcp_client.async_call("inspect_component", params)
 
         elif action == "get_member":
@@ -360,8 +360,8 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
     except Exception as e:
-        logger.error(f"Error in s1_inspect/{action}: {e}")
-        return [TextContent(type="text", text=f"Error: {e}")]
+        logger.exception(f"Error in s1_inspect/{action}")
+        return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 
 
 TOOL_HANDLERS = {TOOL_NAME: handle}

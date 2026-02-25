@@ -160,10 +160,13 @@ public class TcpServer
     private async Task HandleClient(NetworkStream stream)
     {
         ModLogger.Debug($"HandleClient started (CanRead: {stream.CanRead}, CanWrite: {stream.CanWrite})");
-        
+
         // Give the client a moment to be ready
         await Task.Delay(100);
-        
+
+        // Cancelled when this connection ends — used to abort pending TCS waits promptly
+        using var disconnectCts = new System.Threading.CancellationTokenSource();
+
         while (_isRunning && stream.CanRead && _connectedClient?.Connected == true)
         {
             try
@@ -243,33 +246,42 @@ public class TcpServer
                 ModLogger.Debug($"Enqueuing command: {request.Method} (ID: {request.Id})");
                 var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _pendingRequests[request.Id] = tcs;
-                _commandQueue.EnqueueCommand(request);
-                ModLogger.Debug($"Command enqueued successfully. Queue size: {_commandQueue.Count}");
-
-                // Wait for ResponseLoop to confirm the response was sent (no polling needed)
-                var responseTask = tcs.Task;
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(10));
-                var completed = await Task.WhenAny(responseTask, timeoutTask);
-                _pendingRequests.TryRemove(request.Id, out _);
-
-                if (completed == timeoutTask)
+                try
                 {
-                    ModLogger.Warn($"Timeout waiting for response to be sent for request {request.Id}");
+                    _commandQueue.EnqueueCommand(request);
+                    ModLogger.Debug($"Command enqueued successfully. Queue size: {_commandQueue.Count}");
+
+                    // Wait for ResponseLoop to confirm the response was sent.
+                    // Also race against a timeout and the client disconnect signal so we don't
+                    // block for 10 s when the connection drops mid-request.
+                    var responseTask   = tcs.Task;
+                    var timeoutTask    = Task.Delay(TimeSpan.FromSeconds(10));
+                    var disconnectTask = Task.Delay(Timeout.Infinite, disconnectCts.Token);
+                    var completed = await Task.WhenAny(responseTask, timeoutTask, disconnectTask);
+
+                    if (completed == timeoutTask)
+                        ModLogger.Warn($"Timeout waiting for response to be sent for request {request.Id}");
+                    else if (completed == disconnectTask)
+                        ModLogger.Debug($"Client disconnected while waiting for response to request {request.Id}");
+                    else
+                        ModLogger.Debug($"Response for request {request.Id} sent successfully");
                 }
-                else
+                finally
                 {
-                    ModLogger.Debug($"Response for request {request.Id} sent successfully");
+                    _pendingRequests.TryRemove(request.Id, out _);
                 }
             }
             catch (IOException ex)
             {
-                // Client disconnected or stream error
+                // Client disconnected or stream error — signal any pending TCS waits
+                disconnectCts.Cancel();
                 ModLogger.Debug($"Client connection lost (IOException): {ex.Message}");
                 ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                 break;
             }
             catch (Exception ex)
             {
+                disconnectCts.Cancel();
                 ModLogger.Error($"Error handling client: {ex.Message}");
                 ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                 ModLogger.Debug($"Stack trace: {ex}");
