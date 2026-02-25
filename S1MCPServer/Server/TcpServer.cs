@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -23,6 +24,7 @@ public class TcpServer
     private Task? _responseTask;
     private Task? _heartbeatTask;
     private readonly System.Threading.SemaphoreSlim _streamSemaphore = new System.Threading.SemaphoreSlim(1, 1);
+    private readonly ConcurrentDictionary<int, TaskCompletionSource<bool>> _pendingRequests = new();
     private int _heartbeatRequestId = 0;
     private readonly object _heartbeatIdLock = new object();
 
@@ -239,81 +241,24 @@ public class TcpServer
 
                 // Enqueue command for main thread processing
                 ModLogger.Debug($"Enqueuing command: {request.Method} (ID: {request.Id})");
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingRequests[request.Id] = tcs;
                 _commandQueue.EnqueueCommand(request);
                 ModLogger.Debug($"Command enqueued successfully. Queue size: {_commandQueue.Count}");
-                
-                // Wait for the response to be sent
-                int initialResponseCount = _responseQueue.Count;
-                int waitIterations = 0;
-                const int maxWaitIterations = 200; // Max 10 seconds (200 * 50ms)
-                
-                while (_responseQueue.Count >= initialResponseCount && waitIterations < maxWaitIterations)
+
+                // Wait for ResponseLoop to confirm the response was sent (no polling needed)
+                var responseTask = tcs.Task;
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(10));
+                var completed = await Task.WhenAny(responseTask, timeoutTask);
+                _pendingRequests.TryRemove(request.Id, out _);
+
+                if (completed == timeoutTask)
                 {
-                    await Task.Delay(50);
-                    waitIterations++;
-                }
-                
-                if (waitIterations >= maxWaitIterations)
-                {
-                    ModLogger.Warn($"Waited {maxWaitIterations * 50}ms for response to be sent for request {request.Id}");
+                    ModLogger.Warn($"Timeout waiting for response to be sent for request {request.Id}");
                 }
                 else
                 {
-                    ModLogger.Debug($"Response for request {request.Id} was sent after {waitIterations * 50}ms");
-                }
-                
-                // Now wait for acknowledgment from client before reading next message
-                ModLogger.Debug($"Waiting for acknowledgment for request {request.Id}...");
-                bool shouldBreakAfterAck = false;
-                try
-                {
-                    await _streamSemaphore.WaitAsync();
-                    try
-                    {
-                        if (!stream.CanRead || _connectedClient?.Connected != true)
-                        {
-                            ModLogger.Debug("HandleClient: Stream disconnected while waiting for acknowledgment");
-                            shouldBreakAfterAck = true;
-                        }
-                        else
-                        {
-                            // Read acknowledgment
-                            string ackJson = await ProtocolHandler.ReadMessageAsync(stream);
-                            ModLogger.Debug($"Received acknowledgment: {ackJson}");
-                            
-                            // Deserialize acknowledgment
-                            var acknowledgment = ProtocolHandler.DeserializeAcknowledgment(ackJson);
-                            if (acknowledgment.Id == request.Id)
-                            {
-                                ModLogger.Debug($"Acknowledgment received for request {request.Id} (status: {acknowledgment.Status})");
-                            }
-                            else
-                            {
-                                ModLogger.Warn($"Acknowledgment ID mismatch: expected {request.Id}, got {acknowledgment.Id}");
-                            }
-                        }
-                    }
-                    catch (IOException ex) when (ex.Message.Contains("No data available"))
-                    {
-                        ModLogger.Debug("HandleClient: No acknowledgment data available, client may have disconnected");
-                        shouldBreakAfterAck = true;
-                    }
-                    finally
-                    {
-                        _streamSemaphore.Release();
-                    }
-                    
-                    if (shouldBreakAfterAck)
-                    {
-                        break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ModLogger.Error($"Error reading acknowledgment for request {request.Id}: {ex.Message}");
-                    ModLogger.Debug($"Exception type: {ex.GetType().Name}");
-                    // Continue - don't break the connection on ack error
-                    // Note: If semaphore was acquired, it was released in finally block above
+                    ModLogger.Debug($"Response for request {request.Id} sent successfully");
                 }
             }
             catch (IOException ex)
@@ -379,6 +324,10 @@ public class TcpServer
                             }
                             
                             ModLogger.Debug($"Successfully sent response for request ID: {response.Id}");
+
+                            // Signal HandleClient that response was sent
+                            if (_pendingRequests.TryGetValue(response.Id, out var responseTcs))
+                                responseTcs.TrySetResult(true);
                         }
                         catch (Exception ex)
                         {

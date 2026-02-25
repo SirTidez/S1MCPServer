@@ -6,3 +6,4 @@ riderModule.iml
 /.idea
 S1MCPServer/build/paths.local.props
 /.serena
+.idea/

@@ -11,18 +11,13 @@ from .tcp_client import TcpClient, TcpConnectionError
 from .utils.config import Config
 from .utils.logger import setup_logger, get_logger
 
-# Import all tool modules
-from .tools import npc_tools
-from .tools import player_tools
-from .tools import item_tools
-from .tools import property_tools
-from .tools import vehicle_tools
-from .tools import game_state_tools
-from .tools import debug_tools
-from .tools import log_tools
-from .tools import game_lifecycle_tools
-from .tools import load_manager_tools
-from .tools import s1api_docs_tools
+# Consolidated tool modules (6 tools replacing the previous 47)
+from .tools import player as player_tools
+from .tools import npc as npc_tools
+from .tools import item as item_tools
+from .tools import world as world_tools
+from .tools import inspect as inspect_tools
+from .tools import game as game_tools
 
 
 # Global TCP client instance
@@ -34,8 +29,8 @@ is_connected: bool = False
 logger = get_logger()
 
 
-# Lifecycle tools that don't require game connection
-LIFECYCLE_TOOLS = {"s1_launch_game", "s1_close_game", "s1_get_game_process_info", "s1_search_s1api_docs"}
+# Tools that don't require an active game connection
+LIFECYCLE_TOOLS = {"s1_game"}
 
 
 def can_call_tool(tool_name: str) -> tuple[bool, str]:
@@ -81,104 +76,23 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
     all_tools: list[Tool] = []
     all_tool_handlers: dict[str, callable] = {}
     
-    # NPC tools
-    try:
-        tools = npc_tools.get_npc_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(npc_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} NPC tools")
-    except Exception as e:
-        logger.error(f"Error loading NPC tools: {e}", exc_info=True)
-    
-    # Player tools
-    try:
-        tools = player_tools.get_player_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(player_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} player tools")
-    except Exception as e:
-        logger.error(f"Error loading player tools: {e}", exc_info=True)
-    
-    # Item tools
-    try:
-        tools = item_tools.get_item_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(item_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} item tools")
-    except Exception as e:
-        logger.error(f"Error loading item tools: {e}", exc_info=True)
-    
-    # Property tools
-    try:
-        tools = property_tools.get_property_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(property_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} property tools")
-    except Exception as e:
-        logger.error(f"Error loading property tools: {e}", exc_info=True)
-    
-    # Vehicle tools
-    try:
-        tools = vehicle_tools.get_vehicle_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(vehicle_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} vehicle tools")
-    except Exception as e:
-        logger.error(f"Error loading vehicle tools: {e}", exc_info=True)
-    
-    # Game state tools
-    try:
-        tools = game_state_tools.get_game_state_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(game_state_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} game state tools")
-    except Exception as e:
-        logger.error(f"Error loading game state tools: {e}", exc_info=True)
-    
-    # Debug tools
-    try:
-        tools = debug_tools.get_debug_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(debug_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} debug tools")
-    except Exception as e:
-        logger.error(f"Error loading debug tools: {e}", exc_info=True)
-    
-    # Log tools
-    try:
-        tools = log_tools.get_log_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(log_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} log tools")
-    except Exception as e:
-        logger.error(f"Error loading log tools: {e}", exc_info=True)
-    
-    # Game lifecycle tools
-    try:
-        tools = game_lifecycle_tools.get_game_lifecycle_tools(tcp_client, config)
-        all_tools.extend(tools)
-        all_tool_handlers.update(game_lifecycle_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} game lifecycle tools")
-    except Exception as e:
-        logger.error(f"Error loading game lifecycle tools: {e}", exc_info=True)
-    
-    # LoadManager tools
-    try:
-        tools = load_manager_tools.get_load_manager_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(load_manager_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} LoadManager tools")
-    except Exception as e:
-        logger.error(f"Error loading LoadManager tools: {e}", exc_info=True)
-    
-    # S1API documentation tools
-    try:
-        tools = s1api_docs_tools.get_s1api_docs_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(s1api_docs_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} S1API documentation tools")
-    except Exception as e:
-        logger.error(f"Error loading S1API documentation tools: {e}", exc_info=True)
+    tool_modules = [
+        ("player",  lambda: player_tools.get_tools(tcp_client),          player_tools.TOOL_HANDLERS),
+        ("npc",     lambda: npc_tools.get_tools(tcp_client),              npc_tools.TOOL_HANDLERS),
+        ("item",    lambda: item_tools.get_tools(tcp_client),             item_tools.TOOL_HANDLERS),
+        ("world",   lambda: world_tools.get_tools(tcp_client),            world_tools.TOOL_HANDLERS),
+        ("inspect", lambda: inspect_tools.get_tools(tcp_client),          inspect_tools.TOOL_HANDLERS),
+        ("game",    lambda: game_tools.get_tools(tcp_client, config),     game_tools.TOOL_HANDLERS),
+    ]
+
+    for name, loader, handlers in tool_modules:
+        try:
+            tools = loader()
+            all_tools.extend(tools)
+            all_tool_handlers.update(handlers)
+            logger.debug(f"Loaded tool: {name}")
+        except Exception as e:
+            logger.error(f"Error loading {name} tool: {e}", exc_info=True)
     
     # Log tool collection
     logger.info(f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}")
@@ -235,11 +149,7 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
         logger.debug(f"Found handler for {name}, invoking...")
         
         try:
-            # Game lifecycle tools need config parameter
-            if name.startswith("s1_launch_game") or name.startswith("s1_close_game") or name.startswith("s1_get_game_process_info"):
-                result = await handler(arguments, tcp_client, config)
-            else:
-                result = await handler(arguments, tcp_client)
+            result = await handler(arguments, tcp_client)
             logger.debug(f"Tool {name} completed successfully, result type: {type(result)}")
             return result
         except TcpConnectionError as e:
