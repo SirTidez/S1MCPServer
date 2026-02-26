@@ -35,13 +35,17 @@ LIFECYCLE_TOOLS = {"s1_game"}
 
 def can_call_tool(tool_name: str) -> tuple[bool, str]:
     """
-    Check if a tool can be called based on connection state.
+    Check whether a tool call is allowed for the current connection state.
+
+    Non-lifecycle tools require an active game connection. If the process
+    started before the game/mod was ready, this function attempts a lazy
+    reconnect + handshake before returning a "not connected" error.
 
     Args:
         tool_name: Name of the tool to check
 
     Returns:
-        Tuple of (can_call, error_message)
+        Tuple of ``(can_call, error_message)``.
     """
     global is_connected
 

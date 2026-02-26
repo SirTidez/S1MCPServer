@@ -20,12 +20,16 @@ LIVE_PORT = int(os.getenv("S1_LIVE_PORT", "8765"))
 
 
 def _require_live_tests() -> None:
+    """Skip the current test unless explicit live-test opt-in is enabled."""
+
     if not LIVE_TESTS_ENABLED:
         pytest.skip("Set S1_LIVE_TESTS=1 to run live Schedule I integration tests")
 
 
 @pytest.mark.live_game
 def test_live_game_installation_path_and_version_detection() -> None:
+    """Validate that the configured live install path exists and has a detectable runtime."""
+
     _require_live_tests()
 
     assert LIVE_GAME_DIR.exists(), f"Game directory does not exist: {LIVE_GAME_DIR}"
@@ -39,6 +43,8 @@ def test_live_game_installation_path_and_version_detection() -> None:
 
 @pytest.mark.live_game
 def test_live_mod_handshake_when_game_running() -> None:
+    """Perform a real handshake against the running game mod over TCP."""
+
     _require_live_tests()
 
     if not _is_game_running():

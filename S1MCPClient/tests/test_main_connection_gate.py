@@ -6,6 +6,8 @@ from src import main
 
 
 class _FakeTcpClient:
+    """Small test double for the parts of ``TcpClient`` used by ``can_call_tool``."""
+
     def __init__(self, connected: bool, handshake_error=None):
         self._connected = connected
         self._handshake_error = handshake_error
@@ -28,6 +30,8 @@ class _FakeTcpClient:
 
 
 def test_can_call_tool_allows_lifecycle_when_disconnected():
+    """Lifecycle tool calls must bypass connection gating."""
+
     main.is_connected = False
     main.tcp_client = None
 
@@ -38,6 +42,8 @@ def test_can_call_tool_allows_lifecycle_when_disconnected():
 
 
 def test_can_call_tool_lazy_reconnects_and_allows_non_lifecycle_tool():
+    """A successful lazy reconnect should allow normal tool calls."""
+
     main.is_connected = False
     main.server_instructions = None
     main.tcp_client = _FakeTcpClient(connected=False, handshake_error=None)
@@ -53,6 +59,8 @@ def test_can_call_tool_lazy_reconnects_and_allows_non_lifecycle_tool():
 
 
 def test_can_call_tool_denies_when_lazy_reconnect_fails():
+    """Reconnect failures should return a user-facing not-connected error."""
+
     main.is_connected = False
     main.server_instructions = None
     main.tcp_client = _FakeTcpClient(

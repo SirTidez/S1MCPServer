@@ -542,6 +542,12 @@ public class TcpServer
         ModLogger.Debug("HeartbeatLoop ended");
     }
 
+    /// <summary>
+    /// Resolves and clears all pending request waiters.
+    /// </summary>
+    /// <param name="success">
+    /// Result value used to complete each pending request task.
+    /// </param>
     private void CompletePendingRequests(bool success)
     {
         foreach (var requestId in _pendingRequests.Keys)
@@ -553,6 +559,11 @@ public class TcpServer
         }
     }
 
+    /// <summary>
+    /// Waits briefly for a background task to stop and logs non-fatal shutdown errors.
+    /// </summary>
+    /// <param name="task">Task to wait on.</param>
+    /// <param name="taskName">Name used in debug logs.</param>
     private static void WaitForTaskCompletion(Task? task, string taskName)
     {
         if (task == null)
