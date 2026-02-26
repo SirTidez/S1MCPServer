@@ -1,4 +1,6 @@
+#if !MONO
 using System.Text.Json.Serialization;
+#endif
 using UnityEngine;
 
 namespace S1MCPServer.Models;
@@ -11,19 +13,25 @@ public class Position
     /// <summary>
     /// X coordinate.
     /// </summary>
+#if !MONO
     [JsonPropertyName("x")]
+#endif
     public float X { get; set; }
 
     /// <summary>
     /// Y coordinate.
     /// </summary>
+#if !MONO
     [JsonPropertyName("y")]
+#endif
     public float Y { get; set; }
 
     /// <summary>
     /// Z coordinate.
     /// </summary>
+#if !MONO
     [JsonPropertyName("z")]
+#endif
     public float Z { get; set; }
 
     /// <summary>

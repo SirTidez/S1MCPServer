@@ -248,7 +248,11 @@ public class TcpServer
                 {
                     ModLogger.Debug("Deserializing request...");
                     request = ProtocolHandler.DeserializeRequest(jsonMessage);
+#if MONO
+                    ModLogger.Debug($"Deserialized request: ID={request.Id}, Method={request.Method}, Params={Newtonsoft.Json.JsonConvert.SerializeObject(request.Params)}");
+#else
                     ModLogger.Debug($"Deserialized request: ID={request.Id}, Method={request.Method}, Params={System.Text.Json.JsonSerializer.Serialize(request.Params)}");
+#endif
                 }
                 catch (Exception ex)
                 {
