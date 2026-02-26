@@ -1,5 +1,6 @@
 """TCP client for communicating with the mod."""
 
+import asyncio
 import socket
 import struct
 import threading
@@ -22,7 +23,7 @@ class TcpConnectionError(Exception):
 class TcpClient:
     """TCP client for mod communication."""
     
-    def __init__(self, host: str = "localhost", port: int = 8765, timeout: float = 5.0, reconnect_delay: float = 1.0):
+    def __init__(self, host: str = "localhost", port: int = 8765, timeout: float = 5.0, reconnect_delay: float = 0.25):
         """
         Initialize the TCP client.
         
@@ -321,29 +322,7 @@ class TcpClient:
                     self.logger.debug(f"Response contains error: code={response.error.code}, message={response.error.message}")
                 else:
                     self.logger.debug(f"Response contains result: {type(response.result)}")
-                
-                # Send acknowledgment to server
-                try:
-                    self.logger.debug(f"Sending acknowledgment for request ID: {request_id}")
-                    ack = Acknowledgment(id=request_id, status="received")
-                    ack_bytes = self._serialize_acknowledgment(ack)
-                    
-                    # Set a shorter timeout for acknowledgment write
-                    old_timeout = self._socket.gettimeout()
-                    self._socket.settimeout(5.0)
-                    try:
-                        self._write_message(ack_bytes)
-                        self.logger.debug(f"Acknowledgment sent for request ID: {request_id}")
-                    finally:
-                        # Restore original timeout
-                        self._socket.settimeout(old_timeout)
-                except socket.timeout:
-                    self.logger.warning(f"Acknowledgment send timeout for request ID: {request_id}")
-                    # Don't fail the call if ack times out
-                except Exception as e:
-                    self.logger.warning(f"Failed to send acknowledgment: {e}")
-                    # Don't fail the call if ack fails
-                
+
                 return response
                 
             except (TcpConnectionError, ProtocolError) as e:
@@ -401,6 +380,11 @@ class TcpClient:
         self.logger.error(f"call_with_retry: Giving up after {max_retries} failed attempts")
         raise last_error or TcpConnectionError("Call failed with unknown error")
     
+    async def async_call(self, method: str, params: Optional[Dict[str, Any]] = None) -> "Response":
+        """Async wrapper for call_with_retry — runs in thread pool so the event loop stays unblocked."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.call_with_retry(method, params))
+
     def __enter__(self):
         """Context manager entry."""
         self.connect()

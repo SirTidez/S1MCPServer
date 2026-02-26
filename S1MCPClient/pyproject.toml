@@ -13,6 +13,19 @@ dependencies = [
 [project.scripts]
 s1mcpclient = "src.main:main"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "live_game: optional tests that require a real local Schedule I install and running mod",
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

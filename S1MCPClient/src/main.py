@@ -11,18 +11,13 @@ from .tcp_client import TcpClient, TcpConnectionError
 from .utils.config import Config
 from .utils.logger import setup_logger, get_logger
 
-# Import all tool modules
-from .tools import npc_tools
-from .tools import player_tools
-from .tools import item_tools
-from .tools import property_tools
-from .tools import vehicle_tools
-from .tools import game_state_tools
-from .tools import debug_tools
-from .tools import log_tools
-from .tools import game_lifecycle_tools
-from .tools import load_manager_tools
-from .tools import s1api_docs_tools
+# Consolidated tool modules (6 tools replacing the previous 47)
+from .tools import player as player_tools
+from .tools import npc as npc_tools
+from .tools import item as item_tools
+from .tools import world as world_tools
+from .tools import inspect as inspect_tools
+from .tools import game as game_tools
 
 
 # Global TCP client instance
@@ -34,163 +29,130 @@ is_connected: bool = False
 logger = get_logger()
 
 
-# Lifecycle tools that don't require game connection
-LIFECYCLE_TOOLS = {"s1_launch_game", "s1_close_game", "s1_get_game_process_info", "s1_search_s1api_docs"}
+# Tools that don't require an active game connection
+LIFECYCLE_TOOLS = {"s1_game"}
 
 
-def can_call_tool(tool_name: str) -> tuple[bool, str]:
+async def can_call_tool(tool_name: str) -> tuple[bool, str]:
     """
-    Check if a tool can be called based on connection state.
-    
+    Check whether a tool call is allowed for the current connection state.
+
+    Non-lifecycle tools require an active game connection. If the process
+    started before the game/mod was ready, this function attempts a lazy
+    reconnect + handshake before returning a "not connected" error.
+
     Args:
         tool_name: Name of the tool to check
-    
+
     Returns:
-        Tuple of (can_call, error_message)
+        Tuple of ``(can_call, error_message)``.
     """
     global is_connected
-    
+
     # Lifecycle tools can always be called
     if tool_name in LIFECYCLE_TOOLS:
         return True, ""
-    
-    # All other tools require game connection
+
+    # All other tools require game connection.
+    # If we previously started disconnected, attempt a lazy reconnect before denying the tool call.
     if not is_connected:
+        if tcp_client is not None:
+            try:
+                handshake_response = await tcp_client.async_call("handshake", {})
+                if handshake_response.error is None:
+                    is_connected = True
+
+                    handshake_data = handshake_response.result
+                    if isinstance(handshake_data, dict):
+                        global server_instructions
+                        instructions = handshake_data.get("instructions")
+                        if isinstance(instructions, str) and instructions:
+                            server_instructions = instructions
+
+                    logger.info(
+                        "Lazy reconnect succeeded; game tools are now available"
+                    )
+                    return True, ""
+            except Exception as e:
+                logger.debug(f"Lazy reconnect failed: {e}")
+
         return False, (
-            "Error: Game is not connected. Please launch the game first using s1_launch_game.\n"
-            "Once the game is running and connected, you can use other game tools."
+            "Error: Game is not connected.\n"
+            "If the game is already running, wait a moment and retry.\n"
+            "Otherwise use s1_game with action='launch'."
         )
-    
+
     return True, ""
 
 
 def create_server(config: Config, tcp_client: TcpClient) -> Server:
     """
     Create and configure the MCP server.
-    
+
     Args:
         config: Configuration instance
         tcp_client: TCP client instance
-    
+
     Returns:
         Configured MCP server
     """
     server = Server("s1mcpclient")
-    
+
     # Collect all tools
     all_tools: list[Tool] = []
     all_tool_handlers: dict[str, callable] = {}
-    
-    # NPC tools
-    try:
-        tools = npc_tools.get_npc_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(npc_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} NPC tools")
-    except Exception as e:
-        logger.error(f"Error loading NPC tools: {e}", exc_info=True)
-    
-    # Player tools
-    try:
-        tools = player_tools.get_player_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(player_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} player tools")
-    except Exception as e:
-        logger.error(f"Error loading player tools: {e}", exc_info=True)
-    
-    # Item tools
-    try:
-        tools = item_tools.get_item_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(item_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} item tools")
-    except Exception as e:
-        logger.error(f"Error loading item tools: {e}", exc_info=True)
-    
-    # Property tools
-    try:
-        tools = property_tools.get_property_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(property_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} property tools")
-    except Exception as e:
-        logger.error(f"Error loading property tools: {e}", exc_info=True)
-    
-    # Vehicle tools
-    try:
-        tools = vehicle_tools.get_vehicle_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(vehicle_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} vehicle tools")
-    except Exception as e:
-        logger.error(f"Error loading vehicle tools: {e}", exc_info=True)
-    
-    # Game state tools
-    try:
-        tools = game_state_tools.get_game_state_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(game_state_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} game state tools")
-    except Exception as e:
-        logger.error(f"Error loading game state tools: {e}", exc_info=True)
-    
-    # Debug tools
-    try:
-        tools = debug_tools.get_debug_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(debug_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} debug tools")
-    except Exception as e:
-        logger.error(f"Error loading debug tools: {e}", exc_info=True)
-    
-    # Log tools
-    try:
-        tools = log_tools.get_log_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(log_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} log tools")
-    except Exception as e:
-        logger.error(f"Error loading log tools: {e}", exc_info=True)
-    
-    # Game lifecycle tools
-    try:
-        tools = game_lifecycle_tools.get_game_lifecycle_tools(tcp_client, config)
-        all_tools.extend(tools)
-        all_tool_handlers.update(game_lifecycle_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} game lifecycle tools")
-    except Exception as e:
-        logger.error(f"Error loading game lifecycle tools: {e}", exc_info=True)
-    
-    # LoadManager tools
-    try:
-        tools = load_manager_tools.get_load_manager_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(load_manager_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} LoadManager tools")
-    except Exception as e:
-        logger.error(f"Error loading LoadManager tools: {e}", exc_info=True)
-    
-    # S1API documentation tools
-    try:
-        tools = s1api_docs_tools.get_s1api_docs_tools(tcp_client)
-        all_tools.extend(tools)
-        all_tool_handlers.update(s1api_docs_tools.TOOL_HANDLERS)
-        logger.debug(f"Loaded {len(tools)} S1API documentation tools")
-    except Exception as e:
-        logger.error(f"Error loading S1API documentation tools: {e}", exc_info=True)
-    
+
+    tool_modules = [
+        (
+            "player",
+            lambda: player_tools.get_tools(tcp_client),
+            player_tools.TOOL_HANDLERS,
+        ),
+        ("npc", lambda: npc_tools.get_tools(tcp_client), npc_tools.TOOL_HANDLERS),
+        ("item", lambda: item_tools.get_tools(tcp_client), item_tools.TOOL_HANDLERS),
+        ("world", lambda: world_tools.get_tools(tcp_client), world_tools.TOOL_HANDLERS),
+        (
+            "inspect",
+            lambda: inspect_tools.get_tools(tcp_client),
+            inspect_tools.TOOL_HANDLERS,
+        ),
+        (
+            "game",
+            lambda: game_tools.get_tools(tcp_client, config),
+            game_tools.TOOL_HANDLERS,
+        ),
+    ]
+
+    for name, loader, handlers in tool_modules:
+        try:
+            tools = loader()
+            conflicts = set(handlers.keys()) & set(all_tool_handlers.keys())
+            if conflicts:
+                logger.error(f"Handler key collision in module '{name}': {conflicts}")
+                raise ValueError(f"Duplicate tool handler keys: {conflicts}")
+            all_tools.extend(tools)
+            all_tool_handlers.update(handlers)
+            logger.debug(f"Loaded tool: {name}")
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Error loading {name} tool: {e}", exc_info=True)
+
     # Log tool collection
-    logger.info(f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}")
-    logger.info(f"Collected {len(all_tool_handlers)} tool handlers: {list(all_tool_handlers.keys())}")
-    
+    logger.info(
+        f"Collected {len(all_tools)} tools: {[tool.name for tool in all_tools]}"
+    )
+    logger.info(
+        f"Collected {len(all_tool_handlers)} tool handlers: {list(all_tool_handlers.keys())}"
+    )
+
     # Register list_tools handler
     @server.list_tools()
     async def handle_list_tools() -> list[Tool]:
         """List all available tools."""
         logger.debug(f"list_tools called, returning {len(all_tools)} tools")
         return all_tools
-    
+
     # Register list_prompts handler (if we want to expose prompts)
     # For now, instructions are passed via InitializationOptions which provides context to the LLM
     # Prompts would be a separate interactive feature
@@ -199,80 +161,83 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
         """List available prompts."""
         # Currently no prompts - instructions are passed via InitializationOptions
         return []
-    
+
     # Register call_tool handler
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict) -> list:
         """
         Handle tool calls.
-        
+
         Args:
             name: Tool name
             arguments: Tool arguments
-        
+
         Returns:
             Tool result
         """
         from mcp.types import TextContent
-        
+
         logger.debug(f"Tool call received: {name} with arguments: {arguments}")
-        
+
         if name not in all_tool_handlers:
             logger.error(f"Unknown tool: {name}")
             logger.debug(f"Available tools: {list(all_tool_handlers.keys())}")
-            return [TextContent(
-                type="text",
-                text=f"Error: Unknown tool '{name}'. Available tools: {', '.join(all_tool_handlers.keys())}"
-            )]
-        
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: Unknown tool '{name}'. Available tools: {', '.join(all_tool_handlers.keys())}",
+                )
+            ]
+
         # Check if tool can be called based on connection state
-        can_call, error_msg = can_call_tool(name)
+        can_call, error_msg = await can_call_tool(name)
         if not can_call:
             logger.warning(f"Tool {name} called but game not connected")
             return [TextContent(type="text", text=error_msg)]
-        
+
         handler = all_tool_handlers[name]
         logger.debug(f"Found handler for {name}, invoking...")
-        
+
         try:
-            # Game lifecycle tools need config parameter
-            if name.startswith("s1_launch_game") or name.startswith("s1_close_game") or name.startswith("s1_get_game_process_info"):
-                result = await handler(arguments, tcp_client, config)
-            else:
-                result = await handler(arguments, tcp_client)
-            logger.debug(f"Tool {name} completed successfully, result type: {type(result)}")
+            result = await handler(arguments, tcp_client)
+            logger.debug(
+                f"Tool {name} completed successfully, result type: {type(result)}"
+            )
             return result
         except TcpConnectionError as e:
             logger.error(f"Connection error in tool handler {name}: {e}", exc_info=True)
-            return [TextContent(
-                type="text",
-                text=f"Error: Connection failed - {str(e)}. Please ensure the game is running with the mod loaded."
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: Connection failed - {str(e)}. Please ensure the game is running with the mod loaded.",
+                )
+            ]
         except Exception as e:
             logger.error(f"Error in tool handler {name}: {e}", exc_info=True)
             # Return error as TextContent instead of raising to prevent TaskGroup errors
-            return [TextContent(
-                type="text",
-                text=f"Error executing tool '{name}': {str(e)}"
-            )]
-    
+            return [
+                TextContent(
+                    type="text", text=f"Error executing tool '{name}': {str(e)}"
+                )
+            ]
+
     return server
 
 
 async def main():
     """Main entry point."""
     global tcp_client
-    
+
     # Prevent multiple instances - check if we're already running
     import atexit
     import os
     import tempfile
     import platform
-    
+
     pid_file = os.path.join(tempfile.gettempdir(), "s1mcpclient.pid")
     if os.path.exists(pid_file):
         try:
-            with open(pid_file, 'r') as f:
+            with open(pid_file, "r") as f:
                 old_pid = int(f.read().strip())
             # Check if the process is still running
             # On Windows, os.kill() doesn't support signal 0, so we use a different approach
@@ -281,8 +246,11 @@ async def main():
                 if platform.system() == "Windows":
                     # On Windows, try to open the process to check if it exists
                     import ctypes
+
                     kernel32 = ctypes.windll.kernel32
-                    handle = kernel32.OpenProcess(0x1000, False, old_pid)  # PROCESS_QUERY_INFORMATION
+                    handle = kernel32.OpenProcess(
+                        0x1000, False, old_pid
+                    )  # PROCESS_QUERY_INFORMATION
                     if handle and handle != 0:
                         kernel32.CloseHandle(handle)
                         process_exists = True
@@ -294,9 +262,11 @@ async def main():
             except (OSError, ProcessLookupError, ValueError, AttributeError):
                 # Process doesn't exist or error accessing it
                 process_exists = False
-            
+
             if process_exists:
-                logger.warning(f"Another instance appears to be running (PID: {old_pid}). Continuing anyway...")
+                logger.warning(
+                    f"Another instance appears to be running (PID: {old_pid}). Continuing anyway..."
+                )
             else:
                 # Process doesn't exist, remove stale PID file
                 try:
@@ -309,53 +279,55 @@ async def main():
                 os.remove(pid_file)
             except OSError:
                 pass  # Ignore errors removing invalid PID file
-    
+
     # Write our PID
     try:
-        with open(pid_file, 'w') as f:
+        with open(pid_file, "w") as f:
             f.write(str(os.getpid()))
-        
+
         def cleanup_pid():
             try:
                 if os.path.exists(pid_file):
                     os.remove(pid_file)
             except OSError:
                 pass  # Ignore errors during cleanup
-        
+
         atexit.register(cleanup_pid)
     except Exception as e:
         logger.debug(f"Could not create PID file: {e}")
-    
+
     # Load configuration
     config = Config.from_file()
-    
+
     # Setup logger
     setup_logger(level=config.log_level)
     logger.info("Starting S1MCPClient MCP server...")
-    
+
     # Initialize TCP client
     try:
         tcp_client = TcpClient(
             host=config.host,
             port=config.port,
             timeout=config.connection_timeout,
-            reconnect_delay=config.reconnect_delay
+            reconnect_delay=config.reconnect_delay,
         )
-        
+
         # Try to connect (optional - game might not be running yet)
         global is_connected
         try:
             logger.debug("Attempting initial connection to mod (optional)...")
             tcp_client.connect()
             logger.info("Connected to mod successfully")
-            
+
             # Perform handshake to verify connection and get available methods
             try:
                 logger.debug("Performing handshake with mod...")
                 handshake_response = tcp_client.call("handshake", {})
-                
+
                 if handshake_response.error:
-                    logger.warning(f"Handshake failed: {handshake_response.error.message}")
+                    logger.warning(
+                        f"Handshake failed: {handshake_response.error.message}"
+                    )
                 else:
                     handshake_data = handshake_response.result
                     if isinstance(handshake_data, dict):
@@ -363,30 +335,38 @@ async def main():
                         total_methods = handshake_data.get("total_methods", 0)
                         server_name = handshake_data.get("server_name", "Unknown")
                         version = handshake_data.get("version", "Unknown")
-                        
+
                         # Extract instructions for LLM prompt
                         global server_instructions
                         server_instructions = handshake_data.get("instructions")
                         if server_instructions:
-                            logger.info(f"Received server instructions for LLM prompt ({len(server_instructions)} characters)")
-                            logger.debug(f"Instructions preview: {server_instructions[:200]}...")
+                            logger.info(
+                                f"Received server instructions for LLM prompt ({len(server_instructions)} characters)"
+                            )
+                            logger.debug(
+                                f"Instructions preview: {server_instructions[:200]}..."
+                            )
                         else:
-                            logger.warning("No instructions provided in handshake response")
-                        
+                            logger.warning(
+                                "No instructions provided in handshake response"
+                            )
+
                         logger.info(f"Handshake successful: {server_name} v{version}")
                         logger.info(f"Available methods: {total_methods}")
                         logger.debug(f"Methods: {', '.join(available_methods)}")
-                        
+
                         # Mark as connected
                         is_connected = True
-                        
+
                         # Log method categories if available
                         if "method_categories" in handshake_data:
                             categories = handshake_data["method_categories"]
                             for category, methods in categories.items():
                                 if methods:
-                                    logger.debug(f"  {category}: {len(methods)} methods")
-                        
+                                    logger.debug(
+                                        f"  {category}: {len(methods)} methods"
+                                    )
+
                         # Log integrations
                         if "integrations" in handshake_data:
                             integrations = handshake_data["integrations"]
@@ -396,16 +376,18 @@ async def main():
             except Exception as e:
                 logger.warning(f"Handshake failed: {e}. Connection may still work.")
                 logger.debug(f"Handshake error details: {e}", exc_info=True)
-                
+
         except TcpConnectionError as e:
             logger.info(f"Game not running at startup: {e}")
-            logger.info("MCP server will wait for game to be launched via s1_launch_game tool.")
+            logger.info(
+                "MCP server will wait for game to be launched via s1_game tool."
+            )
             is_connected = False
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize TCP client: {e}")
         sys.exit(1)
-    
+
     # Create server
     try:
         server = create_server(config, tcp_client)
@@ -413,33 +395,35 @@ async def main():
     except Exception as e:
         logger.error(f"Failed to create server: {e}")
         sys.exit(1)
-    
+
     # Run server with stdio transport
     try:
         logger.info("Starting MCP server with stdio transport...")
         async with stdio_server() as (read_stream, write_stream):
             # Create initialization options with tools capability enabled
             # Use instructions from handshake if available
-            logger.info(f"Creating InitializationOptions with instructions: {server_instructions is not None}")
+            logger.info(
+                f"Creating InitializationOptions with instructions: {server_instructions is not None}"
+            )
             if server_instructions:
-                logger.info(f"Instructions length: {len(server_instructions)} characters")
+                logger.info(
+                    f"Instructions length: {len(server_instructions)} characters"
+                )
             init_options = InitializationOptions(
                 server_name="s1mcpclient",
                 server_version="0.1.0",
-                capabilities=ServerCapabilities(
-                    tools=ToolsCapability()
-                ),
-                instructions=server_instructions
+                capabilities=ServerCapabilities(tools=ToolsCapability()),
+                instructions=server_instructions,
             )
             if server_instructions:
-                logger.info(f"InitializationOptions created with server-provided instructions ({len(server_instructions)} chars)")
+                logger.info(
+                    f"InitializationOptions created with server-provided instructions ({len(server_instructions)} chars)"
+                )
             else:
-                logger.warning("InitializationOptions created WITHOUT instructions - handshake may not have completed")
-            await server.run(
-                read_stream,
-                write_stream,
-                init_options
-            )
+                logger.warning(
+                    "InitializationOptions created WITHOUT instructions - handshake may not have completed"
+                )
+            await server.run(read_stream, write_stream, init_options)
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
     except Exception as e:
@@ -478,10 +462,10 @@ def entry_point():
         except:
             print(f"Fatal error: {type(e).__name__}: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
 
 if __name__ == "__main__":
     entry_point()
-

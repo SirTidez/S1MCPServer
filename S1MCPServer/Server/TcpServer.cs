@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -23,6 +24,8 @@ public class TcpServer
     private Task? _responseTask;
     private Task? _heartbeatTask;
     private readonly System.Threading.SemaphoreSlim _streamSemaphore = new System.Threading.SemaphoreSlim(1, 1);
+    private readonly ConcurrentDictionary<int, TaskCompletionSource<bool>> _pendingRequests = new();
+    private System.Threading.CancellationTokenSource? _lifecycleCts;
     private int _heartbeatRequestId = 0;
     private readonly object _heartbeatIdLock = new object();
 
@@ -49,9 +52,12 @@ public class TcpServer
         }
 
         _isRunning = true;
-        _serverTask = Task.Run(ServerLoop);
-        _responseTask = Task.Run(ResponseLoop);
-        _heartbeatTask = Task.Run(HeartbeatLoop);
+        _lifecycleCts = new System.Threading.CancellationTokenSource();
+        var lifecycleToken = _lifecycleCts.Token;
+
+        _serverTask = Task.Run(() => ServerLoop(lifecycleToken), lifecycleToken);
+        _responseTask = Task.Run(() => ResponseLoop(lifecycleToken), lifecycleToken);
+        _heartbeatTask = Task.Run(() => HeartbeatLoop(lifecycleToken), lifecycleToken);
         ModLogger.Info($"TCP server started on port {Port}");
     }
 
@@ -66,6 +72,8 @@ public class TcpServer
         }
 
         _isRunning = false;
+        _lifecycleCts?.Cancel();
+        CompletePendingRequests(success: false);
         
         _clientStream?.Close();
         _connectedClient?.Close();
@@ -75,9 +83,16 @@ public class TcpServer
         _connectedClient = null;
         _tcpListener = null;
 
-        _serverTask?.Wait(TimeSpan.FromSeconds(2));
-        _responseTask?.Wait(TimeSpan.FromSeconds(2));
-        _heartbeatTask?.Wait(TimeSpan.FromSeconds(2));
+        WaitForTaskCompletion(_serverTask, nameof(_serverTask));
+        WaitForTaskCompletion(_responseTask, nameof(_responseTask));
+        WaitForTaskCompletion(_heartbeatTask, nameof(_heartbeatTask));
+
+        _serverTask = null;
+        _responseTask = null;
+        _heartbeatTask = null;
+
+        _lifecycleCts?.Dispose();
+        _lifecycleCts = null;
 
         ModLogger.Info("TCP server stopped");
     }
@@ -85,10 +100,10 @@ public class TcpServer
     /// <summary>
     /// Main server loop that accepts client connections.
     /// </summary>
-    private async void ServerLoop()
+    private async Task ServerLoop(System.Threading.CancellationToken cancellationToken)
     {
         ModLogger.Debug("ServerLoop started");
-        while (_isRunning)
+        while (_isRunning && !cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -117,9 +132,13 @@ public class TcpServer
 
                 // Handle client communication
                 ModLogger.Debug("Starting client handler...");
-                await HandleClient(_clientStream);
+                await HandleClient(_clientStream, cancellationToken);
 
                 ModLogger.Info("Client disconnected");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
@@ -137,15 +156,22 @@ public class TcpServer
                 _connectedClient?.Close();
                 _clientStream = null;
                 _connectedClient = null;
+                CompletePendingRequests(success: false);
 
                 _tcpListener?.Stop();
                 _tcpListener = null;
 
                 // Wait a bit before trying to reconnect
-                if (_isRunning)
+                if (_isRunning && !cancellationToken.IsCancellationRequested)
                 {
                     ModLogger.Debug("Waiting 1 second before reconnecting...");
-                    await Task.Delay(1000);
+                    try
+                    {
+                        await Task.Delay(1000, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
                 }
             }
         }
@@ -155,32 +181,43 @@ public class TcpServer
     /// <summary>
     /// Handles communication with a connected client.
     /// </summary>
-    private async Task HandleClient(NetworkStream stream)
+    private async Task HandleClient(NetworkStream stream, System.Threading.CancellationToken cancellationToken)
     {
         ModLogger.Debug($"HandleClient started (CanRead: {stream.CanRead}, CanWrite: {stream.CanWrite})");
-        
+
         // Give the client a moment to be ready
-        await Task.Delay(100);
-        
-        while (_isRunning && stream.CanRead && _connectedClient?.Connected == true)
+        try
+        {
+            await Task.Delay(100, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // Cancelled when this connection ends — used to abort pending TCS waits promptly
+        using var disconnectCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var disconnectTask = Task.Delay(Timeout.Infinite, disconnectCts.Token);
+
+        while (_isRunning && !cancellationToken.IsCancellationRequested && stream.CanRead && _connectedClient?.Connected == true)
         {
             try
             {
                 ModLogger.Debug("Waiting to read message from client...");
                 
-                // Read request from client - use semaphore to prevent concurrent read/write
-                string jsonMessage = null;
+                // Read next request from client
+                string jsonMessage = string.Empty;
                 bool shouldContinue = false;
-                await _streamSemaphore.WaitAsync();
+
+                // Check connection before reading
+                if (!stream.CanRead || _connectedClient?.Connected != true)
+                {
+                    ModLogger.Debug("HandleClient: Stream disconnected before read");
+                    break;
+                }
+
                 try
                 {
-                    // Check connection before reading
-                    if (!stream.CanRead || _connectedClient?.Connected != true)
-                    {
-                        ModLogger.Debug("HandleClient: Stream disconnected before read");
-                        break;
-                    }
-                    
                     jsonMessage = await ProtocolHandler.ReadMessageAsync(stream);
                     ModLogger.Debug($"Received raw JSON message ({jsonMessage.Length} chars): {jsonMessage}");
                 }
@@ -190,14 +227,18 @@ public class TcpServer
                     ModLogger.Debug("HandleClient: No data available, client may be waiting for response. Waiting before next read...");
                     shouldContinue = true;
                 }
-                finally
-                {
-                    _streamSemaphore.Release();
-                }
                 
                 if (shouldContinue)
                 {
-                    await Task.Delay(200);
+                    try
+                    {
+                        await Task.Delay(200, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        disconnectCts.Cancel();
+                        break;
+                    }
                     continue;
                 }
 
@@ -222,7 +263,7 @@ public class TcpServer
                     );
                     ModLogger.Debug("Sending parse error response to client...");
                     // Use semaphore for write operation too
-                    await _streamSemaphore.WaitAsync();
+                    await _streamSemaphore.WaitAsync(cancellationToken);
                     try
                     {
                         if (stream.CanWrite && _connectedClient?.Connected == true)
@@ -239,92 +280,48 @@ public class TcpServer
 
                 // Enqueue command for main thread processing
                 ModLogger.Debug($"Enqueuing command: {request.Method} (ID: {request.Id})");
-                _commandQueue.EnqueueCommand(request);
-                ModLogger.Debug($"Command enqueued successfully. Queue size: {_commandQueue.Count}");
-                
-                // Wait for the response to be sent
-                int initialResponseCount = _responseQueue.Count;
-                int waitIterations = 0;
-                const int maxWaitIterations = 200; // Max 10 seconds (200 * 50ms)
-                
-                while (_responseQueue.Count >= initialResponseCount && waitIterations < maxWaitIterations)
-                {
-                    await Task.Delay(50);
-                    waitIterations++;
-                }
-                
-                if (waitIterations >= maxWaitIterations)
-                {
-                    ModLogger.Warn($"Waited {maxWaitIterations * 50}ms for response to be sent for request {request.Id}");
-                }
-                else
-                {
-                    ModLogger.Debug($"Response for request {request.Id} was sent after {waitIterations * 50}ms");
-                }
-                
-                // Now wait for acknowledgment from client before reading next message
-                ModLogger.Debug($"Waiting for acknowledgment for request {request.Id}...");
-                bool shouldBreakAfterAck = false;
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingRequests[request.Id] = tcs;
                 try
                 {
-                    await _streamSemaphore.WaitAsync();
-                    try
-                    {
-                        if (!stream.CanRead || _connectedClient?.Connected != true)
-                        {
-                            ModLogger.Debug("HandleClient: Stream disconnected while waiting for acknowledgment");
-                            shouldBreakAfterAck = true;
-                        }
-                        else
-                        {
-                            // Read acknowledgment
-                            string ackJson = await ProtocolHandler.ReadMessageAsync(stream);
-                            ModLogger.Debug($"Received acknowledgment: {ackJson}");
-                            
-                            // Deserialize acknowledgment
-                            var acknowledgment = ProtocolHandler.DeserializeAcknowledgment(ackJson);
-                            if (acknowledgment.Id == request.Id)
-                            {
-                                ModLogger.Debug($"Acknowledgment received for request {request.Id} (status: {acknowledgment.Status})");
-                            }
-                            else
-                            {
-                                ModLogger.Warn($"Acknowledgment ID mismatch: expected {request.Id}, got {acknowledgment.Id}");
-                            }
-                        }
-                    }
-                    catch (IOException ex) when (ex.Message.Contains("No data available"))
-                    {
-                        ModLogger.Debug("HandleClient: No acknowledgment data available, client may have disconnected");
-                        shouldBreakAfterAck = true;
-                    }
-                    finally
-                    {
-                        _streamSemaphore.Release();
-                    }
-                    
-                    if (shouldBreakAfterAck)
-                    {
-                        break;
-                    }
+                    _commandQueue.EnqueueCommand(request);
+                    ModLogger.Debug($"Command enqueued successfully. Queue size: {_commandQueue.Count}");
+
+                    // Wait for ResponseLoop to confirm the response was sent.
+                    // Also race against a timeout and the client disconnect signal so we don't
+                    // block for 10 s when the connection drops mid-request.
+                    var responseTask   = tcs.Task;
+                    var timeoutTask    = Task.Delay(TimeSpan.FromSeconds(10));
+                    var completed = await Task.WhenAny(responseTask, timeoutTask, disconnectTask);
+
+                    if (completed == timeoutTask)
+                        ModLogger.Warn($"Timeout waiting for response to be sent for request {request.Id}");
+                    else if (completed == disconnectTask)
+                        ModLogger.Debug($"Client disconnected while waiting for response to request {request.Id}");
+                    else
+                        ModLogger.Debug($"Response for request {request.Id} sent successfully");
                 }
-                catch (Exception ex)
+                finally
                 {
-                    ModLogger.Error($"Error reading acknowledgment for request {request.Id}: {ex.Message}");
-                    ModLogger.Debug($"Exception type: {ex.GetType().Name}");
-                    // Continue - don't break the connection on ack error
-                    // Note: If semaphore was acquired, it was released in finally block above
+                    _pendingRequests.TryRemove(request.Id, out _);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                disconnectCts.Cancel();
+                break;
             }
             catch (IOException ex)
             {
-                // Client disconnected or stream error
+                // Client disconnected or stream error — signal any pending TCS waits
+                disconnectCts.Cancel();
                 ModLogger.Debug($"Client connection lost (IOException): {ex.Message}");
                 ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                 break;
             }
             catch (Exception ex)
             {
+                disconnectCts.Cancel();
                 ModLogger.Error($"Error handling client: {ex.Message}");
                 ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                 ModLogger.Debug($"Stack trace: {ex}");
@@ -337,10 +334,10 @@ public class TcpServer
     /// <summary>
     /// Response loop that sends responses back to the client.
     /// </summary>
-    private async void ResponseLoop()
+    private async Task ResponseLoop(System.Threading.CancellationToken cancellationToken)
     {
         ModLogger.Debug("ResponseLoop started");
-        while (_isRunning)
+        while (_isRunning && !cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -360,7 +357,7 @@ public class TcpServer
                             ModLogger.Debug($"Writing response to stream for ID: {response.Id}...");
                             
                             // Use semaphore to prevent concurrent read/write operations
-                            await _streamSemaphore.WaitAsync();
+                            await _streamSemaphore.WaitAsync(cancellationToken);
                             try
                             {
                                 // Check connection again inside semaphore
@@ -379,13 +376,21 @@ public class TcpServer
                             }
                             
                             ModLogger.Debug($"Successfully sent response for request ID: {response.Id}");
+
+                            // Signal HandleClient that response was sent
+                            if (_pendingRequests.TryGetValue(response.Id, out var responseTcs))
+                                responseTcs.TrySetResult(true);
                         }
                         catch (Exception ex)
                         {
                             ModLogger.Error($"Failed to send response for ID {response.Id}: {ex.Message}");
                             ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                             ModLogger.Debug($"Stack trace: {ex}");
-                            
+
+                            // Signal HandleClient immediately so it doesn't wait out the full timeout
+                            if (_pendingRequests.TryGetValue(response.Id, out var failedTcs))
+                                failedTcs.TrySetResult(false);
+
                             // Don't re-enqueue if stream is broken/disconnected
                             if (ex.Message.Contains("broken") || ex.Message.Contains("disconnected") || ex.Message.Contains("EOF"))
                             {
@@ -401,22 +406,37 @@ public class TcpServer
                     }
                     else
                     {
-                        // No client connected, discard response
+                        // No client connected, discard response — signal HandleClient so it doesn't wait out the timeout
                         ModLogger.Debug($"No client connected (stream null: {_clientStream == null}, CanWrite: {_clientStream?.CanWrite ?? false}, Connected: {_connectedClient?.Connected ?? false}), discarding response for ID: {response.Id}");
+                        if (_pendingRequests.TryGetValue(response.Id, out var discardTcs))
+                            discardTcs.TrySetResult(false);
                     }
                 }
                 else
                 {
                     // No responses available, wait a bit
-                    await Task.Delay(10);
+                    await Task.Delay(10, cancellationToken);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
                 ModLogger.Error($"Error in response loop: {ex.Message}");
                 ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                 ModLogger.Debug($"Stack trace: {ex}");
-                await Task.Delay(100);
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(100, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                }
             }
         }
         ModLogger.Debug("ResponseLoop ended");
@@ -425,18 +445,18 @@ public class TcpServer
     /// <summary>
     /// Heartbeat loop that sends periodic heartbeat messages to keep the connection alive.
     /// </summary>
-    private async void HeartbeatLoop()
+    private async Task HeartbeatLoop(System.Threading.CancellationToken cancellationToken)
     {
         ModLogger.Debug("HeartbeatLoop started");
         const int heartbeatIntervalSeconds = 60;
         
-        while (_isRunning)
+        while (_isRunning && !cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(heartbeatIntervalSeconds));
+                await Task.Delay(TimeSpan.FromSeconds(heartbeatIntervalSeconds), cancellationToken);
                 
-                if (!_isRunning)
+                if (!_isRunning || cancellationToken.IsCancellationRequested)
                     break;
                 
                 // Check if we have a connected client
@@ -462,7 +482,7 @@ public class TcpServer
                     // The client will receive this but won't need to respond since it's not tied to a request
                     var heartbeatResponse = new Response
                     {
-                        Id = heartbeatId, // Use negative ID to indicate server-initiated
+                        Id = -heartbeatId, // Negative ID indicates server-initiated (no pending request entry)
                         Result = new Dictionary<string, object>
                         {
                             ["type"] = "server_heartbeat",
@@ -473,7 +493,7 @@ public class TcpServer
                     };
                     
                     // Use semaphore to prevent concurrent read/write operations
-                    await _streamSemaphore.WaitAsync();
+                    await _streamSemaphore.WaitAsync(cancellationToken);
                     try
                     {
                         // Check connection again inside semaphore
@@ -486,7 +506,7 @@ public class TcpServer
                         // Send heartbeat response (server-initiated)
                         string jsonResponse = ProtocolHandler.SerializeResponse(heartbeatResponse);
                         await ProtocolHandler.WriteMessageAsync(_clientStream, jsonResponse);
-                        ModLogger.Debug($"HeartbeatLoop: Server heartbeat sent successfully (ID: {heartbeatId})");
+                        ModLogger.Debug($"HeartbeatLoop: Server heartbeat sent successfully (ID: {-heartbeatId})");
                     }
                     finally
                     {
@@ -499,16 +519,66 @@ public class TcpServer
                     // Don't break the loop on heartbeat errors - connection might recover
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 if (_isRunning)
                 {
                     ModLogger.Debug($"HeartbeatLoop: Error in heartbeat loop: {ex.Message}");
-                    await Task.Delay(1000); // Wait a bit before retrying
+                    try
+                    {
+                        await Task.Delay(1000, cancellationToken); // Wait a bit before retrying
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
         }
         ModLogger.Debug("HeartbeatLoop ended");
+    }
+
+    /// <summary>
+    /// Resolves and clears all pending request waiters.
+    /// </summary>
+    /// <param name="success">
+    /// Result value used to complete each pending request task.
+    /// </param>
+    private void CompletePendingRequests(bool success)
+    {
+        foreach (var requestId in _pendingRequests.Keys)
+        {
+            if (_pendingRequests.TryRemove(requestId, out var tcs))
+            {
+                tcs.TrySetResult(success);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits briefly for a background task to stop and logs non-fatal shutdown errors.
+    /// </summary>
+    /// <param name="task">Task to wait on.</param>
+    /// <param name="taskName">Name used in debug logs.</param>
+    private static void WaitForTaskCompletion(Task? task, string taskName)
+    {
+        if (task == null)
+        {
+            return;
+        }
+
+        try
+        {
+            task.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch (Exception ex)
+        {
+            ModLogger.Debug($"{taskName} stopped with {ex.GetType().Name}: {ex.Message}");
+        }
     }
 }
 
