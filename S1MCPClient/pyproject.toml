@@ -22,6 +22,9 @@ test = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live_game: optional tests that require a real local Schedule I install and running mod",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]

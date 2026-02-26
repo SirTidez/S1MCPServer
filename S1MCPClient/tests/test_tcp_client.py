@@ -17,6 +17,7 @@ from src.models.response import Response, ErrorResponse
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _encode_response(data: dict) -> bytes:
     """Build a length-prefixed JSON response as the server would send."""
     payload = json.dumps(data).encode("utf-8")
@@ -26,6 +27,7 @@ def _encode_response(data: dict) -> bytes:
 # ---------------------------------------------------------------------------
 # Initial state
 # ---------------------------------------------------------------------------
+
 
 def test_initial_state():
     client = TcpClient()
@@ -44,9 +46,15 @@ def test_reconnect_delay_default_is_quarter_second():
 # connect / disconnect
 # ---------------------------------------------------------------------------
 
+
 def test_connect_raises_on_refused():
     """Connecting to a port where nothing is listening raises TcpConnectionError."""
-    client = TcpClient(port=19999, timeout=0.5)
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    closed_port = probe.getsockname()[1]
+    probe.close()
+
+    client = TcpClient(host="127.0.0.1", port=closed_port, timeout=0.5)
     with pytest.raises(TcpConnectionError):
         client.connect()
 
@@ -79,6 +87,7 @@ def test_double_connect_is_idempotent():
 # ---------------------------------------------------------------------------
 # async_call wraps call_with_retry
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_async_call_delegates_to_call_with_retry():
@@ -116,6 +125,7 @@ async def test_async_call_runs_in_executor():
 # call_with_retry retry logic
 # ---------------------------------------------------------------------------
 
+
 def test_call_with_retry_succeeds_on_first_attempt():
     client = TcpClient()
     expected = Response(id=1, result={"ok": True}, error=None)
@@ -151,7 +161,9 @@ def test_call_with_retry_raises_after_all_attempts():
     client = TcpClient(reconnect_delay=0.0)
 
     with patch.object(client, "call", side_effect=TcpConnectionError("dead")):
-        with patch.object(client, "connect", side_effect=TcpConnectionError("still dead")):
+        with patch.object(
+            client, "connect", side_effect=TcpConnectionError("still dead")
+        ):
             with patch.object(client, "disconnect"):
                 with pytest.raises(TcpConnectionError):
                     client.call_with_retry("ping", max_retries=2)
@@ -166,7 +178,9 @@ def test_call_with_retry_respects_max_retries():
         raise TcpConnectionError("fail")
 
     with patch.object(client, "call", side_effect=always_fail):
-        with patch.object(client, "connect", side_effect=TcpConnectionError("no server")):
+        with patch.object(
+            client, "connect", side_effect=TcpConnectionError("no server")
+        ):
             with patch.object(client, "disconnect"):
                 with pytest.raises(TcpConnectionError):
                     client.call_with_retry("ping", max_retries=3)
@@ -177,6 +191,7 @@ def test_call_with_retry_respects_max_retries():
 # ---------------------------------------------------------------------------
 # Protocol layer: _read_message / _write_message
 # ---------------------------------------------------------------------------
+
 
 def test_read_message_reads_length_prefixed_data():
     client = TcpClient()
@@ -216,3 +231,29 @@ def test_write_message_sends_all_bytes():
     data = b"hello world"
     client._write_message(data)
     mock_sock.send.assert_called()
+
+
+def test_call_ignores_server_heartbeat_before_real_response():
+    client = TcpClient()
+    client._connected = True
+    client._socket = MagicMock()
+
+    heartbeat = _encode_response(
+        {
+            "id": -1,
+            "result": {"type": "server_heartbeat", "status": "alive"},
+            "error": None,
+        }
+    )
+    actual = _encode_response({"id": 1, "result": {"ok": True}, "error": None})
+
+    with patch.object(client, "_write_message"):
+        with patch.object(
+            client, "_read_message", side_effect=[heartbeat, actual]
+        ) as mock_read:
+            response = client.call("ping", {})
+
+    assert response.id == 1
+    assert response.error is None
+    assert response.result == {"ok": True}
+    assert mock_read.call_count == 2

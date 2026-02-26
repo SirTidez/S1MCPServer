@@ -274,36 +274,10 @@ public static class ProtocolHandler
         
         if (bytesRead == 0)
         {
-            // Check if stream is still readable
-            if (stream is System.Net.Sockets.NetworkStream networkStream2 && networkStream2.CanRead)
-            {
-                Utils.ModLogger.Debug("ReadMessageAsync: Read 0 bytes but stream is still readable - client may be waiting for response");
-                // In request-response pattern, 0 bytes after sending a request is normal
-                // The client is waiting for our response. Don't treat this as an error immediately.
-                // Wait a bit longer to see if client sends another request
-                await Task.Delay(100); // Wait a bit longer
-                
-                // Try reading again
-                bytesRead = await stream.ReadAsync(lengthBuffer, 0, 4);
-                Utils.ModLogger.Debug($"ReadMessageAsync: After wait, read {bytesRead} bytes");
-            }
-            
-            if (bytesRead == 0)
-            {
-                // Final check - if still readable, this might be normal in request-response pattern
-                if (stream is System.Net.Sockets.NetworkStream networkStream3 && networkStream3.CanRead)
-                {
-                    Utils.ModLogger.Debug("ReadMessageAsync: Still 0 bytes but stream readable - treating as normal (client waiting for response)");
-                    // Don't throw error - let the caller handle this
-                    // The connection is still active, just no data yet
-                    throw new IOException("No data available (client may be waiting for response)");
-                }
-                else
-                {
-                    Utils.ModLogger.Error("ReadMessageAsync: Stream returned 0 bytes (EOF/closed)");
-                    throw new IOException("Stream closed or EOF reached (read 0 bytes)");
-                }
-            }
+            // For stream reads, 0 always indicates EOF / remote disconnect.
+            // "CanRead" only indicates stream capability, not that peer is connected.
+            Utils.ModLogger.Error("ReadMessageAsync: Stream returned 0 bytes (EOF/closed)");
+            throw new IOException("Stream closed or EOF reached (read 0 bytes)");
         }
         
         if (bytesRead != 4)
@@ -376,5 +350,4 @@ public static class ProtocolHandler
         Utils.ModLogger.Debug("WriteMessageAsync: Message written and flushed successfully");
     }
 }
-
 
