@@ -75,12 +75,16 @@ def test_double_connect_is_idempotent():
     mock_sock.setsockopt.return_value = None
     mock_sock.settimeout.return_value = None
 
-    with patch("src.tcp_client.socket.socket", return_value=mock_sock):
+    with patch(
+        "src.tcp_client.socket.socket", return_value=mock_sock
+    ) as mock_socket_ctor:
         client._connected = True  # pretend already connected
         client._socket = mock_sock
         client.connect()  # second call — should short-circuit
 
-    # socket.socket() should NOT have been called again
+    # socket.socket() and socket.connect() should NOT have been called again
+    mock_socket_ctor.assert_not_called()
+    mock_sock.connect.assert_not_called()
     assert client._socket is mock_sock
 
 

@@ -197,6 +197,7 @@ public class TcpServer
 
         // Cancelled when this connection ends — used to abort pending TCS waits promptly
         using var disconnectCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var disconnectTask = Task.Delay(Timeout.Infinite, disconnectCts.Token);
 
         while (_isRunning && !cancellationToken.IsCancellationRequested && stream.CanRead && _connectedClient?.Connected == true)
         {
@@ -291,7 +292,6 @@ public class TcpServer
                     // block for 10 s when the connection drops mid-request.
                     var responseTask   = tcs.Task;
                     var timeoutTask    = Task.Delay(TimeSpan.FromSeconds(10));
-                    var disconnectTask = Task.Delay(Timeout.Infinite, disconnectCts.Token);
                     var completed = await Task.WhenAny(responseTask, timeoutTask, disconnectTask);
 
                     if (completed == timeoutTask)

@@ -33,7 +33,7 @@ logger = get_logger()
 LIFECYCLE_TOOLS = {"s1_game"}
 
 
-def can_call_tool(tool_name: str) -> tuple[bool, str]:
+async def can_call_tool(tool_name: str) -> tuple[bool, str]:
     """
     Check whether a tool call is allowed for the current connection state.
 
@@ -58,10 +58,7 @@ def can_call_tool(tool_name: str) -> tuple[bool, str]:
     if not is_connected:
         if tcp_client is not None:
             try:
-                if not tcp_client.is_connected():
-                    tcp_client.connect()
-
-                handshake_response = tcp_client.call("handshake", {})
+                handshake_response = await tcp_client.async_call("handshake", {})
                 if handshake_response.error is None:
                     is_connected = True
 
@@ -193,7 +190,7 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
             ]
 
         # Check if tool can be called based on connection state
-        can_call, error_msg = can_call_tool(name)
+        can_call, error_msg = await can_call_tool(name)
         if not can_call:
             logger.warning(f"Tool {name} called but game not connected")
             return [TextContent(type="text", text=error_msg)]
@@ -383,7 +380,7 @@ async def main():
         except TcpConnectionError as e:
             logger.info(f"Game not running at startup: {e}")
             logger.info(
-                "MCP server will wait for game to be launched via s1_launch_game tool."
+                "MCP server will wait for game to be launched via s1_game tool."
             )
             is_connected = False
 
