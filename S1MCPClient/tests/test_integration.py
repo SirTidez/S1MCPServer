@@ -152,7 +152,7 @@ def test_request_id_roundtrip(mock_server):
     client.connect()
     try:
         response = client.call("echo", {})
-        assert response.id == client._request_id_counter  # last used ID
+        assert response.id == mock_server.requests_received[-1]["id"]
     finally:
         client.disconnect()
 
@@ -240,7 +240,13 @@ def test_multiple_sequential_calls(mock_server):
 
 def test_connect_to_closed_port_raises():
     """Connecting to a port with no listener raises TcpConnectionError."""
-    client = TcpClient(host="127.0.0.1", port=19998, timeout=0.3, reconnect_delay=0.0)
+    # Reserve an ephemeral port, then immediately release it so nothing is listening on it.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    closed_port = probe.getsockname()[1]
+    probe.close()
+
+    client = TcpClient(host="127.0.0.1", port=closed_port, timeout=0.3, reconnect_delay=0.0)
     with pytest.raises(TcpConnectionError):
         client.connect()
 

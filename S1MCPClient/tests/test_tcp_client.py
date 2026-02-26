@@ -57,7 +57,7 @@ def test_disconnect_when_not_connected_is_safe():
     assert not client.is_connected()
 
 
-def test_double_connect_is_idempotent(monkeypatch):
+def test_double_connect_is_idempotent():
     """Calling connect() twice without disconnecting should not open a second socket."""
     client = TcpClient()
 

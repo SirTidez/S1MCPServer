@@ -95,6 +95,8 @@ def create_server(config: Config, tcp_client: TcpClient) -> Server:
             all_tools.extend(tools)
             all_tool_handlers.update(handlers)
             logger.debug(f"Loaded tool: {name}")
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"Error loading {name} tool: {e}", exc_info=True)
     

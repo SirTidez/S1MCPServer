@@ -17,8 +17,8 @@ TOOL = Tool(
         "Inspect and manipulate Unity GameObjects via reflection. Choose an action:\n\n"
         "DISCOVERY:\n"
         "- find_objects: Search GameObjects by name/tag/layer/component_type (all optional)\n"
-        "- find_by_type: Find all objects of a type (requires: type_name; optional: include_inactive)\n"
-        "- search_types: Search type names across all assemblies (requires: query; optional: include_non_public)\n"
+        "- find_by_type: Find all objects of a type (requires: component_type; optional: include_inactive)\n"
+        "- search_types: Search type names across all assemblies (requires: pattern; optional: component_types_only)\n"
         "- list_scenes: List all loaded Unity scenes\n"
         "- get_hierarchy: Get scene object tree (optional: scene_name)\n"
         "- get_scene_objects: Get all objects in a scene (optional: scene_name)\n\n"
@@ -359,7 +359,7 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
             return [TextContent(type="text", text=f"Error: {resp.error.message} (code: {resp.error.code})")]
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"Error in s1_inspect/{action}")
         return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 

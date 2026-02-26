@@ -65,7 +65,7 @@ TOOL = Tool(
 TOOL_HANDLERS: Dict[str, Any] = {}
 
 
-def get_tools(tcp_client: TcpClient, config: Config) -> list[Tool]:
+def get_tools(_tcp_client: TcpClient, config: Config) -> list[Tool]:
     """Register tools, capturing config in a closure so no module-level global is needed."""
 
     async def handle(arguments: Dict[str, Any], tcp_client_: TcpClient) -> list[TextContent]:

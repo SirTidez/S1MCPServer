@@ -28,7 +28,7 @@ async def test_get_inventory_calls_correct_method(mock_tcp):
 async def test_teleport_calls_teleport_player(mock_tcp):
     mock_tcp.async_call.return_value = make_response({"success": True})
     pos = {"x": 1.0, "y": 2.0, "z": 3.0}
-    result = await handle({"action": "teleport", "position": pos}, mock_tcp)
+    await handle({"action": "teleport", "position": pos}, mock_tcp)
     mock_tcp.async_call.assert_called_once_with("teleport_player", {"position": pos})
 
 

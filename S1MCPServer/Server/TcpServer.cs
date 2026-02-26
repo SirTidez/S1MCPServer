@@ -51,9 +51,9 @@ public class TcpServer
         }
 
         _isRunning = true;
-        _serverTask = Task.Run(ServerLoop);
-        _responseTask = Task.Run(ResponseLoop);
-        _heartbeatTask = Task.Run(HeartbeatLoop);
+        _serverTask = Task.Run(() => ServerLoop());
+        _responseTask = Task.Run(() => ResponseLoop());
+        _heartbeatTask = Task.Run(() => HeartbeatLoop());
         ModLogger.Info($"TCP server started on port {Port}");
     }
 
@@ -87,7 +87,7 @@ public class TcpServer
     /// <summary>
     /// Main server loop that accepts client connections.
     /// </summary>
-    private async void ServerLoop()
+    private async Task ServerLoop()
     {
         ModLogger.Debug("ServerLoop started");
         while (_isRunning)
@@ -294,7 +294,7 @@ public class TcpServer
     /// <summary>
     /// Response loop that sends responses back to the client.
     /// </summary>
-    private async void ResponseLoop()
+    private async Task ResponseLoop()
     {
         ModLogger.Debug("ResponseLoop started");
         while (_isRunning)
@@ -346,7 +346,11 @@ public class TcpServer
                             ModLogger.Error($"Failed to send response for ID {response.Id}: {ex.Message}");
                             ModLogger.Debug($"Exception type: {ex.GetType().Name}");
                             ModLogger.Debug($"Stack trace: {ex}");
-                            
+
+                            // Signal HandleClient immediately so it doesn't wait out the full timeout
+                            if (_pendingRequests.TryGetValue(response.Id, out var failedTcs))
+                                failedTcs.TrySetResult(false);
+
                             // Don't re-enqueue if stream is broken/disconnected
                             if (ex.Message.Contains("broken") || ex.Message.Contains("disconnected") || ex.Message.Contains("EOF"))
                             {
@@ -362,8 +366,10 @@ public class TcpServer
                     }
                     else
                     {
-                        // No client connected, discard response
+                        // No client connected, discard response — signal HandleClient so it doesn't wait out the timeout
                         ModLogger.Debug($"No client connected (stream null: {_clientStream == null}, CanWrite: {_clientStream?.CanWrite ?? false}, Connected: {_connectedClient?.Connected ?? false}), discarding response for ID: {response.Id}");
+                        if (_pendingRequests.TryGetValue(response.Id, out var discardTcs))
+                            discardTcs.TrySetResult(false);
                     }
                 }
                 else
@@ -386,7 +392,7 @@ public class TcpServer
     /// <summary>
     /// Heartbeat loop that sends periodic heartbeat messages to keep the connection alive.
     /// </summary>
-    private async void HeartbeatLoop()
+    private async Task HeartbeatLoop()
     {
         ModLogger.Debug("HeartbeatLoop started");
         const int heartbeatIntervalSeconds = 60;
@@ -423,7 +429,7 @@ public class TcpServer
                     // The client will receive this but won't need to respond since it's not tied to a request
                     var heartbeatResponse = new Response
                     {
-                        Id = heartbeatId, // Use negative ID to indicate server-initiated
+                        Id = -heartbeatId, // Negative ID indicates server-initiated (no pending request entry)
                         Result = new Dictionary<string, object>
                         {
                             ["type"] = "server_heartbeat",
@@ -447,7 +453,7 @@ public class TcpServer
                         // Send heartbeat response (server-initiated)
                         string jsonResponse = ProtocolHandler.SerializeResponse(heartbeatResponse);
                         await ProtocolHandler.WriteMessageAsync(_clientStream, jsonResponse);
-                        ModLogger.Debug($"HeartbeatLoop: Server heartbeat sent successfully (ID: {heartbeatId})");
+                        ModLogger.Debug($"HeartbeatLoop: Server heartbeat sent successfully (ID: {-heartbeatId})");
                     }
                     finally
                     {

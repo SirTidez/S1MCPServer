@@ -85,7 +85,7 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
             return [TextContent(type="text", text=f"Error: {resp.error.message} (code: {resp.error.code})")]
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"Error in s1_player/{action}")
         return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 

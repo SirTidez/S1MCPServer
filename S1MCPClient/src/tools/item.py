@@ -80,6 +80,8 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
                 return [TextContent(type="text", text="Error: position is required")]
             params = {"item_id": item_id, "position": position}
             qty = arguments.get("quantity", 1)
+            if isinstance(qty, bool) or not isinstance(qty, int) or qty < 1:
+                return [TextContent(type="text", text="Error: quantity must be a positive integer")]
             if qty != 1:
                 params["quantity"] = qty
             resp = await tcp_client.async_call("spawn_item", params)
@@ -90,7 +92,7 @@ async def handle(arguments: Dict[str, Any], tcp_client: TcpClient) -> list[TextC
             return [TextContent(type="text", text=f"Error: {resp.error.message} (code: {resp.error.code})")]
         return [TextContent(type="text", text=json.dumps(resp.result, indent=2))]
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"Error in s1_item/{action}")
         return [TextContent(type="text", text="An internal error occurred while processing your request.")]
 
