@@ -1,0 +1,12 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "log_level": "info",
+  "connection_timeout": 10,
+  "reconnect_delay": 3,
+  "game_il2cpp_path": "",
+  "game_mono_path": "",
+  "game_executable": "",
+  "game_startup_timeout": 120,
+  "game_connection_poll_interval": 2
+}

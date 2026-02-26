@@ -86,6 +86,11 @@ S1MCPServer/
 │   │   └── utils/        # Utilities (logger, config)
 │   └── requirements.txt  # Python dependencies
 │
+├── S1MCPClientRust/      # Rust MCP server (side-by-side migration)
+│   ├── src/              # MCP server, TCP client, tools, lifecycle/docs modules
+│   ├── config.json.example
+│   └── README.md
+│
 └── README.md             # This file
 ```
 
@@ -117,6 +122,12 @@ A Python-based MCP server that connects to the S1MCPServer mod and exposes game 
 - Configurable via JSON config file
 
 **See:** [S1MCPClient/README.md](S1MCPClient/README.md) for detailed documentation.
+
+### S1MCPClientRust
+
+A Rust-based side-by-side MCP server implementation intended as the native-binary target for the client runtime.
+
+**See:** [S1MCPClientRust/README.md](S1MCPClientRust/README.md) for current status, commands, and parity notes.
 
 ## Quick Start
 
