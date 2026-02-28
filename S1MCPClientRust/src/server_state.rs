@@ -45,11 +45,17 @@ impl ServerState {
     }
 
     pub async fn startup_handshake(&self) {
+        // Attempt the initial TCP connection before running the handshake.
+        if let Err(error) = self.tcp_client.connect().await {
+            info!(error = %error, "Game not connected at startup; waiting for lifecycle flow");
+            return;
+        }
+
         match self.try_handshake().await {
             Ok(()) => info!("Initial handshake successful; game tools enabled"),
             Err(error) => {
                 self.is_connected.store(false, Ordering::SeqCst);
-                info!(error = %error, "Game not connected at startup; waiting for lifecycle flow");
+                info!(error = %error, "Handshake failed at startup; waiting for lifecycle flow");
             }
         }
     }
@@ -69,6 +75,14 @@ impl ServerState {
                 Ok(())
             }
             Err(error) => {
+                // If the socket is gone, try a fresh connect before giving up.
+                if !self.tcp_client.is_connected() {
+                    let _ = self.tcp_client.connect().await;
+                    if let Ok(()) = self.try_handshake().await {
+                        info!("Lazy reconnect (after re-connect) succeeded");
+                        return Ok(());
+                    }
+                }
                 debug!(error = %error, "Lazy reconnect failed");
                 Err(NOT_CONNECTED_MESSAGE.to_string())
             }

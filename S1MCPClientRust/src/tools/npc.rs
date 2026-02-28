@@ -1,81 +1,75 @@
 use rmcp::model::{CallToolResult, JsonObject};
-use serde_json::{json, Value};
+use serde_json::Value;
 
+use crate::mcp::tools::NpcArgs;
 use crate::server_state::ServerState;
 
-use super::common::{call_and_format_result, format_action_for_error, is_truthy, text_result};
+use super::common::{call_and_format_result, text_result};
 
 const TOOL_NAME: &str = "s1_npc";
 
 pub async fn handle_npc(arguments: Option<JsonObject>, state: &ServerState) -> CallToolResult {
-    let args = arguments.unwrap_or_default();
-    let action_value = args.get("action");
-    let action = action_value.and_then(Value::as_str);
-    let action_for_log = format_action_for_error(action_value);
+    let raw = Value::Object(arguments.unwrap_or_default());
+    let args: NpcArgs = match serde_json::from_value(raw) {
+        Ok(a) => a,
+        Err(e) => return text_result(format!("Error: invalid arguments: {e}")),
+    };
 
-    match action {
-        Some("list") => {
+    match args.action.as_str() {
+        "list" => {
             let params = args
-                .get("filter")
-                .filter(|value| is_truthy(value))
-                .map(|filter| json!({ "filter": filter }));
-
-            call_and_format_result(state, "list_npcs", params, TOOL_NAME, &action_for_log).await
+                .filter
+                .map(|f| serde_json::json!({ "filter": f }));
+            call_and_format_result(state, "list_npcs", params, TOOL_NAME, "list").await
         }
-        Some("get") => {
-            let Some(npc_id) = args.get("npc_id").filter(|value| is_truthy(value)) else {
+        "get" => {
+            let Some(npc_id) = args.npc_id else {
                 return text_result("Error: npc_id is required");
             };
-
             call_and_format_result(
                 state,
                 "get_npc",
-                Some(json!({ "npc_id": npc_id })),
+                Some(serde_json::json!({ "npc_id": npc_id })),
                 TOOL_NAME,
-                &action_for_log,
+                "get",
             )
             .await
         }
-        Some("teleport") => {
-            let Some(npc_id) = args.get("npc_id").filter(|value| is_truthy(value)) else {
+        "teleport" => {
+            let Some(npc_id) = args.npc_id else {
                 return text_result("Error: npc_id is required");
             };
-
-            let Some(position) = args.get("position").filter(|value| is_truthy(value)) else {
+            let Some(pos) = args.position else {
                 return text_result("Error: position is required");
             };
-
             call_and_format_result(
                 state,
                 "teleport_npc",
-                Some(json!({ "npc_id": npc_id, "position": position })),
+                Some(serde_json::json!({
+                    "npc_id": npc_id,
+                    "position": { "x": pos.x, "y": pos.y, "z": pos.z }
+                })),
                 TOOL_NAME,
-                &action_for_log,
+                "teleport",
             )
             .await
         }
-        Some("set_health") => {
-            let Some(npc_id) = args.get("npc_id").filter(|value| is_truthy(value)) else {
+        "set_health" => {
+            let Some(npc_id) = args.npc_id else {
                 return text_result("Error: npc_id is required");
             };
-
-            let Some(health) = args.get("health") else {
+            let Some(health) = args.health else {
                 return text_result("Error: health is required");
             };
-
-            if health.is_null() {
-                return text_result("Error: health is required");
-            }
-
             call_and_format_result(
                 state,
                 "set_npc_health",
-                Some(json!({ "npc_id": npc_id, "health": health })),
+                Some(serde_json::json!({ "npc_id": npc_id, "health": health })),
                 TOOL_NAME,
-                &action_for_log,
+                "set_health",
             )
             .await
         }
-        _ => text_result(format!("Error: Unknown action '{}'", action_for_log)),
+        other => text_result(format!("Error: Unknown action '{other}'")),
     }
 }

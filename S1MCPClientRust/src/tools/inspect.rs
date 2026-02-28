@@ -1,521 +1,255 @@
 use rmcp::model::{CallToolResult, JsonObject};
 use serde_json::{json, Map, Value};
 
+use crate::mcp::tools::InspectArgs;
 use crate::server_state::ServerState;
 
-use super::common::{call_and_format_result, format_action_for_error, is_truthy, text_result};
+use super::common::{call_and_format_result, text_result};
 
 const TOOL_NAME: &str = "s1_inspect";
 
 pub async fn handle_inspect(arguments: Option<JsonObject>, state: &ServerState) -> CallToolResult {
-    let args = arguments.unwrap_or_default();
-    let action_value = args.get("action");
-    let action = action_value.and_then(Value::as_str);
-    let action_for_log = format_action_for_error(action_value);
+    let raw = Value::Object(arguments.unwrap_or_default());
+    let args: InspectArgs = match serde_json::from_value(raw) {
+        Ok(a) => a,
+        Err(e) => return text_result(format!("Error: invalid arguments: {e}")),
+    };
+
+    let action = args.action.as_str();
 
     match action {
-        Some("find_objects") => {
+        "find_objects" => {
             let mut params = Map::new();
-            for key in ["name_pattern", "tag", "layer", "component_type"] {
-                if let Some(value) = args.get(key) {
-                    params.insert(key.to_string(), value.clone());
-                }
-            }
-
-            let params_value = if params.is_empty() {
-                Some(json!({}))
-            } else {
-                Some(Value::Object(params))
+            if let Some(v) = args.name_pattern { params.insert("name_pattern".into(), json!(v)); }
+            if let Some(v) = args.tag { params.insert("tag".into(), json!(v)); }
+            if let Some(v) = args.layer { params.insert("layer".into(), json!(v)); }
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            call_and_format_result(state, "find_gameobjects", Some(Value::Object(params)), TOOL_NAME, action).await
+        }
+        "find_by_type" => {
+            let Some(component_type) = args.component_type else {
+                return text_result("Error: component_type required for this action");
             };
-
-            call_and_format_result(
-                state,
-                "find_gameobjects",
-                params_value,
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            let mut params = Map::from_iter([("component_type".into(), json!(component_type))]);
+            if let Some(v) = args.include_inactive { params.insert("include_inactive".into(), json!(v)); }
+            call_and_format_result(state, "find_objects_by_type", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("find_by_type") => {
-            if let Some(error) = require_not_null(&args, &["component_type"]) {
-                return text_result(error);
-            }
-
-            let mut params = Map::from_iter([(
-                "component_type".to_string(),
-                args.get("component_type").cloned().unwrap_or(Value::Null),
-            )]);
-
-            if let Some(value) = args.get("include_inactive") {
-                params.insert("include_inactive".to_string(), value.clone());
-            }
-
-            call_and_format_result(
-                state,
-                "find_objects_by_type",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+        "search_types" => {
+            let Some(pattern) = args.pattern else {
+                return text_result("Error: pattern required for this action");
+            };
+            let mut params = Map::from_iter([("pattern".into(), json!(pattern))]);
+            if let Some(v) = args.component_types_only { params.insert("component_types_only".into(), json!(v)); }
+            call_and_format_result(state, "search_types", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("search_types") => {
-            if let Some(error) = require_not_null(&args, &["pattern"]) {
-                return text_result(error);
-            }
-
-            let mut params = Map::from_iter([(
-                "pattern".to_string(),
-                args.get("pattern").cloned().unwrap_or(Value::Null),
-            )]);
-
-            if let Some(value) = args.get("component_types_only") {
-                params.insert("component_types_only".to_string(), value.clone());
-            }
-
-            call_and_format_result(
-                state,
-                "search_types",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+        "list_scenes" => {
+            call_and_format_result(state, "list_scenes", Some(json!({})), TOOL_NAME, action).await
         }
-        Some("list_scenes") => {
-            call_and_format_result(
-                state,
-                "list_scenes",
-                Some(json!({})),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
-        }
-        Some("get_hierarchy") => {
+        "get_hierarchy" => {
             let mut params = Map::new();
-            if let Some(value) = args.get("scene_name") {
-                if is_truthy(value) {
-                    params.insert("scene_name".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "get_scene_hierarchy",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.scene_name { params.insert("scene_name".into(), json!(v)); }
+            call_and_format_result(state, "get_scene_hierarchy", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("get_scene_objects") => {
+        "get_scene_objects" => {
             let mut params = Map::new();
-            if let Some(value) = args.get("scene_name") {
-                if is_truthy(value) {
-                    params.insert("scene_name".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "get_scene_objects",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.scene_name { params.insert("scene_name".into(), json!(v)); }
+            call_and_format_result(state, "get_scene_objects", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("inspect_object") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-
-            let mut params = Map::from_iter([(
-                "object_name".to_string(),
-                args.get("object_name").cloned().unwrap_or(Value::Null),
-            )]);
-
-            if let Some(value) = args.get("object_type") {
-                if is_truthy(value) {
-                    params.insert("object_type".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "inspect_object",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+        "inspect_object" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let mut params = Map::from_iter([("object_name".into(), json!(object_name))]);
+            if let Some(v) = args.object_type { params.insert("object_type".into(), json!(v)); }
+            call_and_format_result(state, "inspect_object", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("list_components") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-
+        "list_components" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
             call_and_format_result(
-                state,
-                "list_components",
-                Some(json!({ "object_name": args.get("object_name") })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "list_components",
+                Some(json!({ "object_name": object_name })),
+                TOOL_NAME, action,
+            ).await
         }
-        Some("get_component") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "component_type"]) {
-                return text_result(error);
-            }
-
+        "get_component" => {
+            let (Some(object_name), Some(component_type)) = (args.object_name, args.component_type) else {
+                return text_result("Error: object_name, component_type required for this action");
+            };
             call_and_format_result(
-                state,
-                "get_component_by_type",
-                Some(json!({
-                    "object_name": args.get("object_name"),
-                    "component_type": args.get("component_type")
-                })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "get_component_by_type",
+                Some(json!({ "object_name": object_name, "component_type": component_type })),
+                TOOL_NAME, action,
+            ).await
         }
-        Some("inspect_component") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-
-            let mut params = Map::from_iter([(
-                "object_name".to_string(),
-                args.get("object_name").cloned().unwrap_or(Value::Null),
-            )]);
-
-            if let Some(value) = args.get("component_type") {
-                if is_truthy(value) {
-                    params.insert("component_type".to_string(), value.clone());
-                }
-            }
-            if let Some(value) = args.get("max_depth") {
-                params.insert("max_depth".to_string(), value.clone());
-            }
-
-            call_and_format_result(
-                state,
-                "inspect_component",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+        "inspect_component" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let mut params = Map::from_iter([("object_name".into(), json!(object_name))]);
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            if let Some(v) = args.max_depth { params.insert("max_depth".into(), json!(v)); }
+            call_and_format_result(state, "inspect_component", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("get_member") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "member_path"]) {
-                return text_result(error);
-            }
-
+        "get_member" => {
+            let (Some(object_name), Some(member_path)) = (args.object_name, args.member_path) else {
+                return text_result("Error: object_name, member_path required for this action");
+            };
             let mut params = Map::from_iter([
-                (
-                    "object_name".to_string(),
-                    args.get("object_name").cloned().unwrap_or(Value::Null),
-                ),
-                (
-                    "member_path".to_string(),
-                    args.get("member_path").cloned().unwrap_or(Value::Null),
-                ),
+                ("object_name".into(), json!(object_name)),
+                ("member_path".into(), json!(member_path)),
             ]);
-
-            if let Some(value) = args.get("component_type") {
-                if is_truthy(value) {
-                    params.insert("component_type".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "get_member_value",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            call_and_format_result(state, "get_member_value", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("inspect_type") => {
-            if let Some(error) = require_not_null(&args, &["type_name"]) {
-                return text_result(error);
-            }
-
+        "inspect_type" => {
+            let Some(type_name) = args.type_name else {
+                return text_result("Error: type_name required for this action");
+            };
             call_and_format_result(
-                state,
-                "inspect_type",
-                Some(json!({ "type_name": args.get("type_name") })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "inspect_type",
+                Some(json!({ "type_name": type_name })),
+                TOOL_NAME, action,
+            ).await
         }
-        Some("list_members") => {
-            if let Some(error) = require_not_null(&args, &["type_name"]) {
-                return text_result(error);
-            }
-
-            let mut params = Map::from_iter([(
-                "type_name".to_string(),
-                args.get("type_name").cloned().unwrap_or(Value::Null),
-            )]);
-
-            if let Some(value) = args.get("member_type") {
-                if is_truthy(value) {
-                    params.insert("member_type".to_string(), value.clone());
-                }
-            }
-
+        "list_members" => {
+            let Some(type_name) = args.type_name else {
+                return text_result("Error: type_name required for this action");
+            };
+            let mut params = Map::from_iter([("type_name".into(), json!(type_name))]);
+            if let Some(v) = args.member_type { params.insert("member_type".into(), json!(v)); }
+            call_and_format_result(state, "list_members", Some(Value::Object(params)), TOOL_NAME, action).await
+        }
+        "get_transform" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
             call_and_format_result(
-                state,
-                "list_members",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "get_transform",
+                Some(json!({ "object_name": object_name })),
+                TOOL_NAME, action,
+            ).await
         }
-        Some("get_transform") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-
+        "is_active" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
             call_and_format_result(
-                state,
-                "get_transform",
-                Some(json!({ "object_name": args.get("object_name") })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "is_active",
+                Some(json!({ "object_name": object_name })),
+                TOOL_NAME, action,
+            ).await
         }
-        Some("is_active") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-
-            call_and_format_result(
-                state,
-                "is_active",
-                Some(json!({ "object_name": args.get("object_name") })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
-        }
-        Some("get_field") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "field_name"]) {
-                return text_result(error);
-            }
-
+        "get_field" => {
+            let (Some(object_name), Some(field_name)) = (args.object_name, args.field_name) else {
+                return text_result("Error: object_name, field_name required for this action");
+            };
             let mut params = Map::from_iter([
-                (
-                    "object_name".to_string(),
-                    args.get("object_name").cloned().unwrap_or(Value::Null),
-                ),
-                (
-                    "field_name".to_string(),
-                    args.get("field_name").cloned().unwrap_or(Value::Null),
-                ),
+                ("object_name".into(), json!(object_name)),
+                ("field_name".into(), json!(field_name)),
             ]);
-
-            if let Some(value) = args.get("component_type") {
-                if is_truthy(value) {
-                    params.insert("component_type".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "get_field",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            call_and_format_result(state, "get_field", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("set_field") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "field_name"]) {
-                return text_result(error);
-            }
-            if !args.contains_key("value") {
+        "set_field" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let Some(field_name) = args.field_name else {
+                return text_result("Error: field_name required for this action");
+            };
+            let Some(value) = args.value else {
                 return text_result("Error: value is required for set_field");
-            }
-
+            };
             let mut params = Map::from_iter([
-                (
-                    "object_name".to_string(),
-                    args.get("object_name").cloned().unwrap_or(Value::Null),
-                ),
-                (
-                    "field_name".to_string(),
-                    args.get("field_name").cloned().unwrap_or(Value::Null),
-                ),
-                (
-                    "value".to_string(),
-                    args.get("value").cloned().unwrap_or(Value::Null),
-                ),
+                ("object_name".into(), json!(object_name)),
+                ("field_name".into(), json!(field_name)),
+                ("value".into(), value),
             ]);
-
-            if let Some(value) = args.get("component_type") {
-                if is_truthy(value) {
-                    params.insert("component_type".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "set_field",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            call_and_format_result(state, "set_field", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("get_component_property") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "component_type", "property_name"]) {
-                return text_result(error);
-            }
-
+        "get_component_property" => {
+            let (Some(object_name), Some(component_type), Some(property_name)) =
+                (args.object_name, args.component_type, args.property_name) else {
+                return text_result("Error: object_name, component_type, property_name required for this action");
+            };
             call_and_format_result(
-                state,
-                "get_component_property",
+                state, "get_component_property",
                 Some(json!({
-                    "object_name": args.get("object_name"),
-                    "component_type": args.get("component_type"),
-                    "property_name": args.get("property_name")
+                    "object_name": object_name,
+                    "component_type": component_type,
+                    "property_name": property_name
                 })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                TOOL_NAME, action,
+            ).await
         }
-        Some("set_component_property") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "component_type", "property_name"]) {
-                return text_result(error);
-            }
-            if !args.contains_key("value") {
+        "set_component_property" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let Some(component_type) = args.component_type else {
+                return text_result("Error: component_type required for this action");
+            };
+            let Some(property_name) = args.property_name else {
+                return text_result("Error: property_name required for this action");
+            };
+            let Some(value) = args.value else {
                 return text_result("Error: value is required");
-            }
-
+            };
             call_and_format_result(
-                state,
-                "set_component_property",
+                state, "set_component_property",
                 Some(json!({
-                    "object_name": args.get("object_name"),
-                    "component_type": args.get("component_type"),
-                    "property_name": args.get("property_name"),
-                    "value": args.get("value")
+                    "object_name": object_name,
+                    "component_type": component_type,
+                    "property_name": property_name,
+                    "value": value
                 })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                TOOL_NAME, action,
+            ).await
         }
-        Some("call_method") => {
-            if let Some(error) = require_not_null(&args, &["object_name", "method_name"]) {
-                return text_result(error);
-            }
-
+        "call_method" => {
+            let (Some(object_name), Some(method_name)) = (args.object_name, args.method_name) else {
+                return text_result("Error: object_name, method_name required for this action");
+            };
             let mut params = Map::from_iter([
-                (
-                    "object_name".to_string(),
-                    args.get("object_name").cloned().unwrap_or(Value::Null),
-                ),
-                (
-                    "method_name".to_string(),
-                    args.get("method_name").cloned().unwrap_or(Value::Null),
-                ),
+                ("object_name".into(), json!(object_name)),
+                ("method_name".into(), json!(method_name)),
             ]);
-
-            if let Some(value) = args.get("args") {
-                if is_truthy(value) {
-                    params.insert("args".to_string(), value.clone());
-                }
-            }
-            if let Some(value) = args.get("component_type") {
-                if is_truthy(value) {
-                    params.insert("component_type".to_string(), value.clone());
-                }
-            }
-
-            call_and_format_result(
-                state,
-                "call_method",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(v) = args.args { params.insert("args".into(), json!(v)); }
+            if let Some(v) = args.component_type { params.insert("component_type".into(), json!(v)); }
+            call_and_format_result(state, "call_method", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("set_transform") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
+        "set_transform" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let mut params = Map::from_iter([("object_name".into(), json!(object_name))]);
+            if let Some(p) = args.position {
+                params.insert("position".into(), json!({ "x": p.x, "y": p.y, "z": p.z }));
             }
-
-            let mut params = Map::from_iter([(
-                "object_name".to_string(),
-                args.get("object_name").cloned().unwrap_or(Value::Null),
-            )]);
-
-            for key in ["position", "rotation", "scale"] {
-                if let Some(value) = args.get(key) {
-                    params.insert(key.to_string(), value.clone());
-                }
+            if let Some(r) = args.rotation {
+                params.insert("rotation".into(), json!({ "x": r.x, "y": r.y, "z": r.z }));
             }
-
-            call_and_format_result(
-                state,
-                "set_transform",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            if let Some(s) = args.scale {
+                params.insert("scale".into(), json!({ "x": s.x, "y": s.y, "z": s.z }));
+            }
+            call_and_format_result(state, "set_transform", Some(Value::Object(params)), TOOL_NAME, action).await
         }
-        Some("set_active") => {
-            if let Some(error) = require_not_null(&args, &["object_name"]) {
-                return text_result(error);
-            }
-            if !args.contains_key("active") {
+        "set_active" => {
+            let Some(object_name) = args.object_name else {
+                return text_result("Error: object_name required for this action");
+            };
+            let Some(active) = args.active else {
                 return text_result("Error: active is required");
-            }
-
+            };
             call_and_format_result(
-                state,
-                "set_active",
-                Some(json!({
-                    "object_name": args.get("object_name"),
-                    "active": args.get("active")
-                })),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+                state, "set_active",
+                Some(json!({ "object_name": object_name, "active": active })),
+                TOOL_NAME, action,
+            ).await
         }
-        _ => text_result(format!("Error: Unknown action '{}'", action_for_log)),
-    }
-}
-
-fn require_not_null(args: &JsonObject, keys: &[&str]) -> Option<String> {
-    let missing = keys
-        .iter()
-        .copied()
-        .filter(|key| args.get(*key).is_none() || args.get(*key).is_some_and(Value::is_null))
-        .collect::<Vec<_>>();
-
-    if missing.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "Error: {} required for this action",
-            missing.join(", ")
-        ))
+        other => text_result(format!("Error: Unknown action '{other}'")),
     }
 }

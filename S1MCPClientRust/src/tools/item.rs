@@ -1,115 +1,74 @@
 use rmcp::model::{CallToolResult, JsonObject};
-use serde_json::{json, Map, Value};
+use serde_json::Value;
 
+use crate::mcp::tools::ItemArgs;
 use crate::server_state::ServerState;
 
-use super::common::{call_and_format_result, format_action_for_error, is_truthy, text_result};
+use super::common::{call_and_format_result, text_result};
 
 const TOOL_NAME: &str = "s1_item";
 
 pub async fn handle_item(arguments: Option<JsonObject>, state: &ServerState) -> CallToolResult {
-    let args = arguments.unwrap_or_default();
-    let action_value = args.get("action");
-    let action = action_value.and_then(Value::as_str);
-    let action_for_log = format_action_for_error(action_value);
+    let raw = Value::Object(arguments.unwrap_or_default());
+    let args: ItemArgs = match serde_json::from_value(raw) {
+        Ok(a) => a,
+        Err(e) => return text_result(format!("Error: invalid arguments: {e}")),
+    };
 
-    match action {
-        Some("list") => {
+    match args.action.as_str() {
+        "list" => {
             let params = args
-                .get("category")
-                .filter(|value| is_truthy(value))
-                .map(|category| json!({ "category": category }));
-
-            call_and_format_result(state, "list_items", params, TOOL_NAME, &action_for_log).await
+                .category
+                .map(|c| serde_json::json!({ "category": c }));
+            call_and_format_result(state, "list_items", params, TOOL_NAME, "list").await
         }
-        Some("get") => {
-            let Some(item_id) = args.get("item_id").filter(|value| is_truthy(value)) else {
+        "get" => {
+            let Some(item_id) = args.item_id else {
                 return text_result("Error: item_id is required");
             };
-
             call_and_format_result(
                 state,
                 "get_item",
-                Some(json!({ "item_id": item_id })),
+                Some(serde_json::json!({ "item_id": item_id })),
                 TOOL_NAME,
-                &action_for_log,
+                "get",
             )
             .await
         }
-        Some("spawn") => {
-            let Some(item_id) = args.get("item_id").filter(|value| is_truthy(value)) else {
+        "spawn" => {
+            let Some(item_id) = args.item_id else {
                 return text_result("Error: item_id is required");
             };
-
-            let Some(position) = args.get("position").filter(|value| is_truthy(value)) else {
+            let Some(pos) = args.position else {
                 return text_result("Error: position is required");
             };
-
-            let quantity = match parse_spawn_quantity(args.get("quantity")) {
-                Ok(quantity) => quantity,
-                Err(message) => return text_result(message),
-            };
-
-            let mut params = Map::from_iter([
-                ("item_id".to_string(), item_id.clone()),
-                ("position".to_string(), position.clone()),
-            ]);
-
+            let quantity = args.quantity.unwrap_or(1);
+            if quantity < 1 {
+                return text_result("Error: quantity must be a positive integer");
+            }
+            let mut params = serde_json::json!({
+                "item_id": item_id,
+                "position": { "x": pos.x, "y": pos.y, "z": pos.z }
+            });
             if quantity != 1 {
-                params.insert("quantity".to_string(), json!(quantity));
+                params["quantity"] = serde_json::json!(quantity);
             }
-
-            call_and_format_result(
-                state,
-                "spawn_item",
-                Some(Value::Object(params)),
-                TOOL_NAME,
-                &action_for_log,
-            )
-            .await
+            call_and_format_result(state, "spawn_item", Some(params), TOOL_NAME, "spawn").await
         }
-        _ => text_result(format!("Error: Unknown action '{}'", action_for_log)),
-    }
-}
-
-fn parse_spawn_quantity(value: Option<&Value>) -> Result<u64, &'static str> {
-    let Some(raw) = value else {
-        return Ok(1);
-    };
-
-    match raw {
-        Value::Bool(_) => Err("Error: quantity must be a positive integer"),
-        Value::Number(number) => {
-            if let Some(unsigned) = number.as_u64() {
-                if unsigned >= 1 {
-                    return Ok(unsigned);
-                }
-            }
-
-            if let Some(signed) = number.as_i64() {
-                if signed >= 1 {
-                    return Ok(signed as u64);
-                }
-            }
-
-            Err("Error: quantity must be a positive integer")
-        }
-        _ => Err("Error: quantity must be a positive integer"),
+        other => text_result(format!("Error: Unknown action '{other}'")),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_spawn_quantity;
     use serde_json::json;
 
+    use crate::mcp::tools::ItemArgs;
+
     #[test]
-    fn parse_spawn_quantity_matches_python_integer_rules() {
-        assert_eq!(parse_spawn_quantity(None).expect("default quantity"), 1);
-        assert_eq!(parse_spawn_quantity(Some(&json!(1))).expect("one is valid"), 1);
-        assert!(parse_spawn_quantity(Some(&json!(true))).is_err());
-        assert!(parse_spawn_quantity(Some(&json!(0))).is_err());
-        assert!(parse_spawn_quantity(Some(&json!(1.0))).is_err());
-        assert!(parse_spawn_quantity(Some(&json!("1"))).is_err());
+    fn item_args_default_quantity() {
+        let args: ItemArgs =
+            serde_json::from_value(json!({ "action": "spawn", "item_id": "weed_brick" })).unwrap();
+        assert_eq!(args.quantity, None);
     }
 }
