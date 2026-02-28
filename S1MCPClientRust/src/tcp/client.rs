@@ -11,7 +11,8 @@ use tracing::{debug, info, warn};
 
 use crate::models::Response;
 use crate::protocol::{
-    create_request, deserialize_response, is_server_heartbeat, read_frame, serialize_request, write_frame,
+    create_request, deserialize_response, is_server_heartbeat, read_frame, serialize_request,
+    write_frame, ProtocolError,
 };
 use crate::tcp::error::TcpClientError;
 
@@ -88,6 +89,11 @@ impl TcpClient {
         drop(state);
 
         info!(host = %self.host, port = self.port, "Connected to TCP server");
+
+        // Give the C# server's HandleClient time to finish its initial 100ms delay and enter
+        // the read loop so the first request is not sent before the server is ready to read.
+        std::thread::sleep(Duration::from_millis(150));
+
         self.start_heartbeat();
         Ok(())
     }
@@ -119,6 +125,8 @@ impl TcpClient {
         let mut state = self.state.lock().expect("tcp client state poisoned");
         let stream = state.stream.as_mut().ok_or(TcpClientError::NotConnected)?;
 
+        let request_len = request_bytes.len();
+        debug!(method, request_id, bytes = request_len, "Sending request; waiting for response");
         if let Err(error) = write_frame(stream, &request_bytes) {
             state.connected = false;
             state.stream = None;
@@ -126,17 +134,36 @@ impl TcpClient {
         }
 
         loop {
+            debug!(request_id, "Reading response frame from stream");
             let response_frame = match read_frame(stream) {
                 Ok(frame) => frame,
                 Err(error) => {
                     state.connected = false;
                     state.stream = None;
-                    return Err(TcpClientError::from(error));
+                    let tcp_error = match &error {
+                        ProtocolError::Io(io_err)
+                            if io_err.kind() == std::io::ErrorKind::TimedOut =>
+                        {
+                            TcpClientError::Connection(
+                                "Read timed out (90s). Ensure the game is running, in the main scene, and the mod is loaded.".to_string(),
+                            )
+                        }
+                        _ => TcpClientError::from(error),
+                    };
+                    return Err(tcp_error);
                 }
             };
 
             let response = match deserialize_response(&response_frame) {
-                Ok(response) => response,
+                Ok(response) => {
+                    debug!(
+                        response_id = response.id,
+                        request_id,
+                        frame_bytes = response_frame.len(),
+                        "Deserialized response"
+                    );
+                    response
+                }
                 Err(error) => {
                     state.connected = false;
                     state.stream = None;

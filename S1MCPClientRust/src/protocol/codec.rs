@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tracing::trace;
 
 use crate::protocol::{ProtocolError, MAX_MESSAGE_SIZE_BYTES};
 
@@ -62,6 +63,8 @@ where
     reader.read_exact(&mut prefix)?;
 
     let length = u32::from_le_bytes(prefix) as usize;
+    trace!(length, "read_frame: read length prefix (little-endian u32)");
+
     if length > MAX_MESSAGE_SIZE_BYTES {
         return Err(ProtocolError::MessageTooLarge {
             length,
@@ -71,6 +74,7 @@ where
 
     let mut payload = vec![0_u8; length];
     reader.read_exact(&mut payload)?;
+    trace!(length, "read_frame: read payload bytes");
 
     let mut frame = Vec::with_capacity(4 + length);
     frame.extend_from_slice(&prefix);
@@ -82,7 +86,9 @@ pub fn write_frame<W>(writer: &mut W, frame: &[u8]) -> Result<(), ProtocolError>
 where
     W: Write,
 {
+    let len = frame.len();
     writer.write_all(frame)?;
     writer.flush()?;
+    trace!(bytes = len, "write_frame: wrote and flushed");
     Ok(())
 }
