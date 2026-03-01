@@ -1,14 +1,17 @@
 using System.Collections.Generic;
-using Il2CppFishNet;
-using Il2CppScheduleOne.DevUtilities;
-using Il2CppScheduleOne.Money;
 using S1MCPServer.Core;
 using S1MCPServer.Models;
 using S1MCPServer.Utils;
 #if MONO
+using FishNet;
+using ScheduleOne.DevUtilities;
+using ScheduleOne.Money;
 using ScheduleOne.PlayerScripts;
 using S1ItemInstance = ScheduleOne.ItemFramework.ItemInstance;
 #else
+using Il2CppFishNet;
+using Il2CppScheduleOne.DevUtilities;
+using Il2CppScheduleOne.Money;
 using Il2CppScheduleOne.PlayerScripts;
 using S1ItemInstance = Il2CppScheduleOne.ItemFramework.ItemInstance;
 #endif
@@ -227,6 +230,17 @@ public class PlayerCommandHandler : ICommandHandler
                         Z = Convert.ToSingle(posDict.GetValueOrDefault("z", 0.0f))
                     };
                 }
+#if MONO
+                else if (positionObj is Newtonsoft.Json.Linq.JObject jObj)
+                {
+                    position = new Position
+                    {
+                        X = jObj["x"] != null ? jObj["x"].ToObject<float>() : 0.0f,
+                        Y = jObj["y"] != null ? jObj["y"].ToObject<float>() : 0.0f,
+                        Z = jObj["z"] != null ? jObj["z"].ToObject<float>() : 0.0f
+                    };
+                }
+#else
                 else if (positionObj is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
                     position = new Position
@@ -236,6 +250,7 @@ public class PlayerCommandHandler : ICommandHandler
                         Z = jsonElement.TryGetProperty("z", out var zProp) ? (float)zProp.GetDouble() : 0.0f
                     };
                 }
+#endif
             }
             catch
             {

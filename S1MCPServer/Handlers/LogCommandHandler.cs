@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+#if !MONO
 using System.Text.Json;
+#endif
 using System.Text.RegularExpressions;
 using MelonLoader;
 using MelonLoader.Utils;
@@ -301,10 +303,17 @@ public class LogCommandHandler : ICommandHandler
     {
         if (params_.TryGetValue(key, out var value))
         {
+#if MONO
+            if (value is Newtonsoft.Json.Linq.JToken jToken && jToken.Type == Newtonsoft.Json.Linq.JTokenType.Integer)
+            {
+                return jToken.ToObject<int>();
+            }
+#else
             if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Number)
             {
                 return jsonElement.GetInt32();
             }
+#endif
             if (value is int intValue)
             {
                 return intValue;
@@ -325,10 +334,17 @@ public class LogCommandHandler : ICommandHandler
     {
         if (params_.TryGetValue(key, out var value))
         {
+#if MONO
+            if (value is Newtonsoft.Json.Linq.JToken jToken && jToken.Type == Newtonsoft.Json.Linq.JTokenType.String)
+            {
+                return jToken.ToObject<string>();
+            }
+#else
             if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
             {
                 return jsonElement.GetString();
             }
+#endif
             return value?.ToString();
         }
         return null;

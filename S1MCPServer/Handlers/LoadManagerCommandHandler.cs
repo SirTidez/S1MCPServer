@@ -58,30 +58,13 @@ public class LoadManagerCommandHandler : ICommandHandler
         {
             ModLogger.Debug("Listing save games");
 
-            // Access SaveGames as a static property
-            var loadManagerType = typeof(S1LoadManager);
-            var saveGamesProperty = loadManagerType.GetProperty("SaveGames", 
-                BindingFlags.Public | BindingFlags.Static);
-            
-            if (saveGamesProperty == null)
-            {
-                var errorResponse = ProtocolHandler.CreateErrorResponse(
-                    request.Id,
-                    -32000,
-                    "SaveGames property not found on LoadManager"
-                );
-                _responseQueue.EnqueueResponse(errorResponse);
-                return;
-            }
-
-            // Get SaveGames array (static property)
-            var saveGamesArray = saveGamesProperty.GetValue(null);
+            var saveGamesArray = GetSaveGamesArray();
             if (saveGamesArray == null)
             {
                 var errorResponse = ProtocolHandler.CreateErrorResponse(
                     request.Id,
                     -32000,
-                    "SaveGames array is not available or empty"
+                    "SaveGames not found on LoadManager"
                 );
                 _responseQueue.EnqueueResponse(errorResponse);
                 return;
@@ -204,29 +187,13 @@ public class LoadManagerCommandHandler : ICommandHandler
                 return;
             }
 
-            // Access SaveGames as a static property
-            var loadManagerType = typeof(S1LoadManager);
-            var saveGamesProperty = loadManagerType.GetProperty("SaveGames", 
-                BindingFlags.Public | BindingFlags.Static);
-            
-            if (saveGamesProperty == null)
-            {
-                var errorResponse = ProtocolHandler.CreateErrorResponse(
-                    request.Id,
-                    -32000,
-                    "SaveGames property not found on LoadManager"
-                );
-                _responseQueue.EnqueueResponse(errorResponse);
-                return;
-            }
-
-            var saveGamesArray = saveGamesProperty.GetValue(null);
+            var saveGamesArray = GetSaveGamesArray();
             if (saveGamesArray == null)
             {
                 var errorResponse = ProtocolHandler.CreateErrorResponse(
                     request.Id,
                     -32000,
-                    "SaveGames array is not available or empty"
+                    "SaveGames not found on LoadManager"
                 );
                 _responseQueue.EnqueueResponse(errorResponse);
                 return;
@@ -354,6 +321,47 @@ public class LoadManagerCommandHandler : ICommandHandler
                 new { details = ex.Message }
             );
             _responseQueue.EnqueueResponse(errorResponse);
+        }
+    }
+
+    /// <summary>
+    /// Gets the SaveGames array from LoadManager.
+    /// SaveGames is a public static SaveInfo[] field (not a property).
+    /// Falls back to property lookup for forward-compatibility.
+    /// </summary>
+    private object? GetSaveGamesArray()
+    {
+        try
+        {
+            var loadManagerType = typeof(S1LoadManager);
+
+            // Try as a static field first (public static SaveInfo[] SaveGames)
+            var field = loadManagerType.GetField("SaveGames",
+                BindingFlags.Public | BindingFlags.Static);
+            if (field != null)
+            {
+                var value = field.GetValue(null);
+                if (value != null)
+                    return value;
+            }
+
+            // Fall back to property (future-proofing)
+            var prop = loadManagerType.GetProperty("SaveGames",
+                BindingFlags.Public | BindingFlags.Static);
+            if (prop != null)
+            {
+                var value = prop.GetValue(null);
+                if (value != null)
+                    return value;
+            }
+
+            ModLogger.Error("SaveGames not found as a static field or property on LoadManager");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            ModLogger.Error($"Error accessing SaveGames: {ex.Message}");
+            return null;
         }
     }
 

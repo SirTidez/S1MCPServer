@@ -1,0 +1,17 @@
+[package]
+name = "s1_mcp_client_rust"
+version = "0.1.0"
+edition = "2021"
+description = "Rust side-by-side migration scaffold for S1 MCP client"
+
+[dependencies]
+rmcp = { version = "0.6", features = ["server", "macros", "transport-io"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = { version = "0.8", features = ["impl_json_schema"] }
+thiserror = "1.0"
+parking_lot = "0.12"
+tokio = { version = "1.44", features = ["rt", "rt-multi-thread", "time", "macros", "io-std", "net", "io-util", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

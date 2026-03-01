@@ -4,6 +4,8 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 /.idea
-S1MCPServer/build/paths.local.props
 /.serena
 .idea/
+/S1MCPClientRust/target
+AGENTS.md
+S1MCPClientRust/config.json

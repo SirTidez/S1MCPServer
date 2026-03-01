@@ -2,9 +2,14 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using S1MCPServer.Models;
+#if MONO
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+#else
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using S1MCPServer.Models;
+#endif
 
 namespace S1MCPServer.Core;
 
@@ -13,6 +18,16 @@ namespace S1MCPServer.Core;
 /// </summary>
 public static class ProtocolHandler
 {
+#if MONO
+    private static readonly JsonSerializerSettings JsonOptions = new JsonSerializerSettings
+    {
+        ContractResolver = new CamelCasePropertyNamesContractResolver(),
+        NullValueHandling = NullValueHandling.Ignore,
+        Formatting = Formatting.None,
+        ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+        MaxDepth = 32
+    };
+#else
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -21,6 +36,7 @@ public static class ProtocolHandler
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
         MaxDepth = 32 // Limit depth to prevent excessive nesting
     };
+#endif
 
     /// <summary>
     /// Serializes a request to JSON string.
@@ -29,7 +45,11 @@ public static class ProtocolHandler
     /// <returns>JSON string representation.</returns>
     public static string SerializeRequest(Request request)
     {
+#if MONO
+        return JsonConvert.SerializeObject(request, JsonOptions);
+#else
         return JsonSerializer.Serialize(request, JsonOptions);
+#endif
     }
 
     /// <summary>
@@ -43,7 +63,11 @@ public static class ProtocolHandler
         Utils.ModLogger.Debug($"DeserializeRequest: Deserializing JSON ({json.Length} chars): {json}");
         try
         {
+#if MONO
+            var request = JsonConvert.DeserializeObject<Request>(json, JsonOptions);
+#else
             var request = JsonSerializer.Deserialize<Request>(json, JsonOptions);
+#endif
             if (request == null)
             {
                 Utils.ModLogger.Error("DeserializeRequest: Deserialization returned null");
@@ -68,10 +92,15 @@ public static class ProtocolHandler
     public static string SerializeResponse(Response response)
     {
         Utils.ModLogger.Debug($"SerializeResponse: Serializing response ID={response.Id}, has_error={response.Error != null}, has_result={response.Result != null}");
-        
+
         // Sanitize the response to remove non-serializable types (like IntPtr) before serialization
         var sanitizedResponse = SanitizeForSerialization(response);
-        
+
+#if MONO
+        string json = JsonConvert.SerializeObject(sanitizedResponse, JsonOptions);
+        Utils.ModLogger.Debug($"SerializeResponse: Serialized to {json.Length} chars: {json}");
+        return json;
+#else
         try
         {
             string json = JsonSerializer.Serialize(sanitizedResponse, JsonOptions);
@@ -85,6 +114,7 @@ public static class ProtocolHandler
             var moreAggressiveSanitized = SanitizeForSerialization(sanitizedResponse, true);
             return JsonSerializer.Serialize(moreAggressiveSanitized, JsonOptions);
         }
+#endif
     }
 
     /// <summary>
@@ -221,7 +251,11 @@ public static class ProtocolHandler
         Utils.ModLogger.Debug($"DeserializeAcknowledgment: Deserializing JSON ({json.Length} chars): {json}");
         try
         {
+#if MONO
+            var ack = JsonConvert.DeserializeObject<Acknowledgment>(json, JsonOptions);
+#else
             var ack = JsonSerializer.Deserialize<Acknowledgment>(json, JsonOptions);
+#endif
             if (ack == null)
             {
                 Utils.ModLogger.Error("DeserializeAcknowledgment: Deserialization returned null");
@@ -247,14 +281,14 @@ public static class ProtocolHandler
     public static async Task<string> ReadMessageAsync(Stream stream)
     {
         Utils.ModLogger.Debug("ReadMessageAsync: Starting to read message from stream");
-        
+
         // Check if stream is readable
         if (!stream.CanRead)
         {
             Utils.ModLogger.Error("ReadMessageAsync: Stream is not readable");
             throw new IOException("Stream is not readable");
         }
-        
+
         // For NetworkStream, check if readable
         if (stream is System.Net.Sockets.NetworkStream networkStream)
         {
@@ -265,13 +299,13 @@ public static class ProtocolHandler
             }
             Utils.ModLogger.Debug($"ReadMessageAsync: Network stream is readable (CanRead: {networkStream.CanRead})");
         }
-        
+
         // Read 4-byte length prefix
         byte[] lengthBuffer = new byte[4];
         Utils.ModLogger.Debug("ReadMessageAsync: Reading 4-byte length prefix...");
         int bytesRead = await stream.ReadAsync(lengthBuffer, 0, 4);
         Utils.ModLogger.Debug($"ReadMessageAsync: Read {bytesRead} bytes for length prefix");
-        
+
         if (bytesRead == 0)
         {
             // For stream reads, 0 always indicates EOF / remote disconnect.
@@ -279,7 +313,7 @@ public static class ProtocolHandler
             Utils.ModLogger.Error("ReadMessageAsync: Stream returned 0 bytes (EOF/closed)");
             throw new IOException("Stream closed or EOF reached (read 0 bytes)");
         }
-        
+
         if (bytesRead != 4)
         {
             Utils.ModLogger.Error($"ReadMessageAsync: Failed to read message length (got {bytesRead} bytes instead of 4)");
@@ -288,7 +322,7 @@ public static class ProtocolHandler
 
         int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
         Utils.ModLogger.Debug($"ReadMessageAsync: Message length from prefix: {messageLength} bytes");
-        
+
         if (messageLength < 0 || messageLength > 10 * 1024 * 1024) // Max 10MB
         {
             Utils.ModLogger.Error($"ReadMessageAsync: Invalid message length: {messageLength}");
@@ -299,14 +333,14 @@ public static class ProtocolHandler
         byte[] messageBuffer = new byte[messageLength];
         int totalBytesRead = 0;
         int readAttempts = 0;
-        
+
         while (totalBytesRead < messageLength)
         {
             readAttempts++;
             Utils.ModLogger.Debug($"ReadMessageAsync: Read attempt {readAttempts}, reading {messageLength - totalBytesRead} bytes...");
             bytesRead = await stream.ReadAsync(messageBuffer, totalBytesRead, messageLength - totalBytesRead);
             Utils.ModLogger.Debug($"ReadMessageAsync: Read {bytesRead} bytes in attempt {readAttempts}");
-            
+
             if (bytesRead == 0)
             {
                 Utils.ModLogger.Error($"ReadMessageAsync: Stream closed before message complete (read {totalBytesRead}/{messageLength} bytes)");
@@ -330,10 +364,10 @@ public static class ProtocolHandler
     public static async Task WriteMessageAsync(Stream stream, string json)
     {
         Utils.ModLogger.Debug($"WriteMessageAsync: Starting to write message ({json.Length} chars)");
-        
+
         byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
         Utils.ModLogger.Debug($"WriteMessageAsync: Encoded to {jsonBytes.Length} bytes");
-        
+
         byte[] lengthBytes = BitConverter.GetBytes(jsonBytes.Length);
         Utils.ModLogger.Debug($"WriteMessageAsync: Length prefix: {jsonBytes.Length} bytes");
 
@@ -350,4 +384,5 @@ public static class ProtocolHandler
         Utils.ModLogger.Debug("WriteMessageAsync: Message written and flushed successfully");
     }
 }
+
 
